@@ -1,0 +1,252 @@
+CREATE EXTENSION IF NOT EXISTS postgis;
+
+CREATE TABLE alcantarillas (
+    id BIGSERIAL PRIMARY KEY,
+
+    ficha_numero INTEGER,
+
+    universidad TEXT,
+
+    ubicacion TEXT,
+    parroquia TEXT,
+    canton TEXT,
+    provincia TEXT,
+
+    fecha DATE,
+
+    tramo_vial TEXT,
+
+    coordenada_este DOUBLE PRECISION,
+    coordenada_norte DOUBLE PRECISION,
+
+    observaciones TEXT,
+
+    geom geometry(Point, 32717),
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_alcantarillas_geom
+ON alcantarillas
+USING GIST (geom);
+
+CREATE TABLE estados (
+    id SMALLSERIAL PRIMARY KEY,
+    nombre TEXT UNIQUE NOT NULL
+);
+
+INSERT INTO estados (nombre)
+VALUES
+('Malo'),
+('Regular'),
+('Bueno');
+
+CREATE TABLE materiales (
+    id SMALLSERIAL PRIMARY KEY,
+    nombre TEXT UNIQUE NOT NULL
+);
+
+INSERT INTO materiales (nombre)
+VALUES
+('PVC'),
+('Cemento'),
+('Metal Corrugado'),
+('Hormigón Simple'),
+('Hormigón Ciclópeo'),
+('Hormigón Armado');
+
+CREATE TABLE tuberias (
+    id BIGSERIAL PRIMARY KEY,
+
+    alcantarilla_id BIGINT NOT NULL
+    REFERENCES alcantarillas(id)
+    ON DELETE CASCADE,
+
+    material_id SMALLINT
+    REFERENCES materiales(id),
+
+    longitud NUMERIC(10,2),
+
+    diametro NUMERIC(10,2),
+
+    estado_id SMALLINT
+    REFERENCES estados(id),
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE muros (
+    id BIGSERIAL PRIMARY KEY,
+
+    alcantarilla_id BIGINT NOT NULL
+    REFERENCES alcantarillas(id)
+    ON DELETE CASCADE,
+
+    tipo TEXT,
+
+    longitud NUMERIC(10,2),
+
+    ancho NUMERIC(10,2),
+
+    alto NUMERIC(10,2),
+
+    espesor NUMERIC(10,2),
+
+    material_id SMALLINT
+    REFERENCES materiales(id),
+
+    estado_id SMALLINT
+    REFERENCES estados(id),
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE pozos_recoleccion (
+    id BIGSERIAL PRIMARY KEY,
+
+    alcantarilla_id BIGINT NOT NULL
+    REFERENCES alcantarillas(id)
+    ON DELETE CASCADE,
+
+    existe BOOLEAN DEFAULT TRUE,
+
+    ancho NUMERIC(10,2),
+
+    largo NUMERIC(10,2),
+
+    profundidad NUMERIC(10,2),
+
+    estado_id SMALLINT
+    REFERENCES estados(id),
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE fotografias (
+    id BIGSERIAL PRIMARY KEY,
+
+    alcantarilla_id BIGINT NOT NULL
+    REFERENCES alcantarillas(id)
+    ON DELETE CASCADE,
+
+    image_url TEXT NOT NULL,
+
+    descripcion TEXT,
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE inspecciones (
+    id BIGSERIAL PRIMARY KEY,
+
+    alcantarilla_id BIGINT NOT NULL
+    REFERENCES alcantarillas(id)
+    ON DELETE CASCADE,
+
+    inspector TEXT,
+
+    fecha DATE NOT NULL,
+
+    observaciones TEXT,
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE archivos_adjuntos (
+    id BIGSERIAL PRIMARY KEY,
+
+    alcantarilla_id BIGINT NOT NULL
+    REFERENCES alcantarillas(id)
+    ON DELETE CASCADE,
+
+    nombre_archivo TEXT,
+
+    archivo_url TEXT NOT NULL,
+
+    tipo_archivo TEXT,
+
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE OR REPLACE FUNCTION actualizar_geom()
+RETURNS TRIGGER AS $$
+BEGIN
+    NEW.geom = ST_SetSRID(
+        ST_MakePoint(
+            NEW.coordenada_este,
+            NEW.coordenada_norte
+        ),
+        32717
+    );
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER trg_actualizar_geom
+BEFORE INSERT OR UPDATE
+ON alcantarillas
+FOR EACH ROW
+EXECUTE FUNCTION actualizar_geom();
+
+CREATE VIEW vista_completa_alcantarillas AS
+SELECT
+    a.id,
+    a.ficha_numero,
+    a.ubicacion,
+    a.parroquia,
+    a.canton,
+    a.provincia,
+    a.fecha,
+    a.tramo_vial,
+    a.coordenada_este,
+    a.coordenada_norte,
+    a.observaciones,
+
+    t.id AS tuberia_id,
+    mt.nombre AS material_tuberia,
+    t.longitud AS longitud_tuberia,
+    t.diametro,
+    et.nombre AS estado_tuberia,
+
+    m.id AS muro_id,
+    m.tipo AS tipo_muro,
+    m.longitud AS longitud_muro,
+    m.ancho,
+    m.alto,
+    m.espesor,
+    mm.nombre AS material_muro,
+    em.nombre AS estado_muro,
+
+    p.id AS pozo_id,
+    p.existe,
+    p.ancho AS ancho_pozo,
+    p.largo,
+    p.profundidad,
+    ep.nombre AS estado_pozo
+
+FROM alcantarillas a
+
+LEFT JOIN tuberias t
+ON a.id = t.alcantarilla_id
+
+LEFT JOIN materiales mt
+ON t.material_id = mt.id
+
+LEFT JOIN estados et
+ON t.estado_id = et.id
+
+LEFT JOIN muros m
+ON a.id = m.alcantarilla_id
+
+LEFT JOIN materiales mm
+ON m.material_id = mm.id
+
+LEFT JOIN estados em
+ON m.estado_id = em.id
+
+LEFT JOIN pozos_recoleccion p
+ON a.id = p.alcantarilla_id
+
+LEFT JOIN estados ep
+ON p.estado_id = ep.id;

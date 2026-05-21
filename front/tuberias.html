@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Tuberías — CulvertDB</title>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+  <link rel="stylesheet" href="/css/styles.css">
+</head>
+<body>
+<div class="app-shell">
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-logo"><div class="sidebar-logo-icon"><i class="fa-solid fa-water" style="color:white;font-size:14px"></i></div><div class="sidebar-logo-text">CulvertDB<span>Sistema de Drenaje Vial</span></div></div>
+    <nav class="sidebar-nav">
+      <div class="nav-section">
+        <div class="nav-section-label">Principal</div>
+        <a href="/" class="nav-item"><span class="nav-item-icon"><i class="fa-solid fa-gauge-high"></i></span><span>Dashboard</span></a>
+        <a href="/#alcantarillas-crud" class="nav-item"><span class="nav-item-icon"><i class="fa-solid fa-table-list"></i></span><span>Alcantarillas</span></a>
+        <a href="/mapa" class="nav-item"><span class="nav-item-icon"><i class="fa-solid fa-map-location-dot"></i></span><span>Mapa GIS</span></a>
+      </div>
+      <div class="nav-section">
+        <div class="nav-section-label">Gestión</div>
+        <a href="/tuberias" class="nav-item active"><span class="nav-item-icon"><i class="fa-solid fa-pipe-valve"></i></span><span>Tuberías</span></a>
+        <a href="/muros" class="nav-item"><span class="nav-item-icon"><i class="fa-solid fa-wall-brick"></i></span><span>Muros</span></a>
+        <a href="/pozos" class="nav-item"><span class="nav-item-icon"><i class="fa-solid fa-circle-dot"></i></span><span>Pozos</span></a>
+        <a href="/inspecciones" class="nav-item"><span class="nav-item-icon"><i class="fa-solid fa-clipboard-check"></i></span><span>Inspecciones</span></a>
+      </div>
+    </nav>
+    <div class="sidebar-footer">
+      <button class="sidebar-toggle" id="sidebar-toggle"><i class="fa-solid fa-angles-left" id="toggle-icon"></i></button>
+      <div class="nav-item" id="user-sidebar"><span class="nav-item-icon"><div class="user-avatar" id="avatar-sidebar">U</div></span><div><div id="name-sidebar">Cargando...</div><div id="role-sidebar">—</div></div></div>
+    </div>
+  </aside>
+  <div class="main-content">
+    <header class="topbar">
+      <div class="topbar-breadcrumb"><span><i class="fa-solid fa-database"></i></span><span class="topbar-divider">/</span><span class="topbar-breadcrumb-current">Tuberías</span></div>
+      <div class="topbar-search"></div>
+      <div class="topbar-actions">
+        <div class="dropdown" id="user-dropdown-container">
+          <div class="user-menu" onclick="toggleDropdown()"><div class="user-avatar" id="avatar-topbar">?</div><div class="user-info"><div class="user-name" id="name-topbar">Cargando</div><div class="user-role" id="role-topbar">—</div></div><i class="fa-solid fa-chevron-down"></i></div>
+          <div class="dropdown-menu" id="user-dropdown"><div class="dropdown-item"><i class="fa-solid fa-user"></i> Mi Perfil</div><div class="dropdown-divider"></div><div class="dropdown-item danger" onclick="logout()"><i class="fa-solid fa-right-from-bracket"></i> Cerrar Sesión</div></div>
+        </div>
+      </div>
+    </header>
+    <main class="page-content">
+      <div class="page-header">
+        <div class="page-title"><h1>Tuberías</h1><p>Gestión de tuberías asociadas a alcantarillas.</p></div>
+        <button class="btn btn-primary" id="btn-new-tuberia"><i class="fa-solid fa-plus"></i> Nueva tubería</button>
+      </div>
+      <div class="table-container">
+        <div class="table-toolbar">
+          <div class="table-toolbar-left">
+            <select id="filter-alcantarilla" class="filter-input">
+              <option value="">Todas las alcantarillas</option>
+            </select>
+          </div>
+        </div>
+        <div class="table-wrapper">
+          <table class="data-table">
+            <thead><tr><th>ID</th><th>Alcantarilla</th><th>Material</th><th>Diámetro</th><th>Longitud</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <tbody id="tbody-tuberias"><tr><td colspan="7" style="text-align:center;padding:24px;color:var(--color-text-muted)">Cargando...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </main>
+  </div>
+</div>
+<div class="toast-container" id="toast-container"></div>
+<script src="/js/modules/api.js"></script>
+<script src="/js/modules/auth.js"></script>
+<script src="/js/modules/toast.js"></script>
+<script src="/js/modules/modal.js"></script>
+<script src="/js/modules/app.js"></script>
+<script src="/js/modules/tuberias.js"></script>
+</body>
+</html>

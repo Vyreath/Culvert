@@ -1,0 +1,706 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+  <title>CulvertDB — Acceso y Registro</title>
+
+  <!-- Fuentes e Iconos -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    /* ===== DARK THEME VARIABLES (moderno + consistente) ===== */
+    :root {
+      --color-bg: #0a0c12;
+      --color-surface: #11141c;
+      --color-surface-2: #0f1118;
+      --color-surface-3: #1a1e2a;
+      --color-border: #252a36;
+      --color-accent: #3fb1ff;
+      --color-accent-dark: #1a6bbf;
+      --color-accent-glow: rgba(63, 177, 255, 0.25);
+      --color-text: #eef2ff;
+      --color-text-muted: #9aa4bf;
+      --color-text-subtle: #6c768f;
+      --color-danger: #f85149;
+      --color-danger-bg: rgba(248, 81, 73, 0.12);
+      --color-success: #3fb950;
+      --color-success-bg: rgba(63, 185, 80, 0.12);
+      --font-sans: 'Space Grotesk', system-ui, -apple-system, 'Segoe UI', sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--color-bg);
+      color: var(--color-text);
+      height: 100%;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+
+    .login-container {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .login-card {
+      background: var(--color-surface);
+      border: 1px solid var(--color-border);
+      border-radius: 28px;
+      padding: 2rem 1.8rem 2.2rem;
+      width: 100%;
+      max-width: 440px;
+      box-shadow: 0 20px 40px rgba(0, 0, 0, 0.6), 0 0 0 1px rgba(63, 177, 255, 0.05);
+      transition: transform 0.2s ease;
+    }
+
+    .login-logo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 28px;
+    }
+
+    .login-logo-icon {
+      width: 52px;
+      height: 52px;
+      background: linear-gradient(135deg, var(--color-accent-dark), var(--color-accent));
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 26px;
+      color: white;
+      box-shadow: 0 6px 12px rgba(63, 177, 255, 0.2);
+    }
+
+    .login-logo-text {
+      font-size: 1.3rem;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      color: var(--color-text);
+      line-height: 1.2;
+    }
+
+    .login-logo-text span {
+      display: block;
+      font-size: 0.7rem;
+      color: var(--color-text-muted);
+      font-weight: 400;
+      margin-top: 4px;
+      letter-spacing: normal;
+    }
+
+    .login-title {
+      font-size: 1.7rem;
+      font-weight: 700;
+      text-align: center;
+      margin-bottom: 6px;
+      background: linear-gradient(135deg, #ffffff, var(--color-accent));
+      background-clip: text;
+      -webkit-background-clip: text;
+      color: transparent;
+    }
+
+    .login-subtitle {
+      font-size: 0.85rem;
+      color: var(--color-text-muted);
+      text-align: center;
+      margin-bottom: 28px;
+    }
+
+    .form-group {
+      margin-bottom: 1.2rem;
+    }
+
+    .form-label {
+      display: block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--color-text-muted);
+      margin-bottom: 6px;
+    }
+
+    .form-input {
+      width: 100%;
+      padding: 12px 14px;
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border);
+      border-radius: 14px;
+      color: var(--color-text);
+      font-family: var(--font-sans);
+      font-size: 0.9rem;
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    .form-input:focus {
+      border-color: var(--color-accent);
+      box-shadow: 0 0 0 3px var(--color-accent-glow);
+      background: var(--color-surface-3);
+    }
+
+    .form-input::placeholder {
+      color: var(--color-text-subtle);
+      font-size: 0.8rem;
+    }
+
+    /* campos extra registro */
+    .register-fields {
+      display: none;
+      animation: fadeIn 0.25s ease;
+    }
+
+    .register-fields.show {
+      display: block;
+    }
+
+    .action-btn {
+      width: 100%;
+      padding: 12px 16px;
+      background: linear-gradient(105deg, var(--color-accent-dark), var(--color-accent));
+      border: none;
+      border-radius: 40px;
+      color: white;
+      font-family: var(--font-sans);
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-top: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      letter-spacing: 0.3px;
+    }
+
+    .action-btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(63, 177, 255, 0.35);
+      filter: brightness(1.02);
+    }
+
+    .action-btn:active {
+      transform: translateY(0);
+    }
+
+    .action-btn:disabled {
+      opacity: 0.6;
+      transform: none;
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+
+    .toggle-mode {
+      text-align: center;
+      margin-top: 24px;
+      font-size: 0.85rem;
+      color: var(--color-text-muted);
+    }
+
+    .toggle-link {
+      background: none;
+      border: none;
+      color: var(--color-accent);
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 0.85rem;
+      margin-left: 8px;
+      transition: color 0.2s;
+      font-family: var(--font-sans);
+    }
+
+    .toggle-link:hover {
+      text-decoration: underline;
+      color: #7ac4ff;
+    }
+
+    .error-alert {
+      background: var(--color-danger-bg);
+      border-left: 3px solid var(--color-danger);
+      border-radius: 12px;
+      padding: 12px 14px;
+      color: #ffb4ab;
+      font-size: 0.8rem;
+      margin-bottom: 18px;
+      display: none;
+      backdrop-filter: blur(2px);
+    }
+
+    .error-alert.show {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .error-alert i {
+      font-size: 1rem;
+      color: var(--color-danger);
+    }
+
+    .login-footer {
+      font-size: 0.7rem;
+      color: var(--color-text-subtle);
+      text-align: center;
+      margin-top: 28px;
+      padding-top: 18px;
+      border-top: 1px solid var(--color-border);
+    }
+
+    /* Spinner personalizado */
+    .spinner {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      border-radius: 50%;
+      border-top-color: white;
+      animation: spin 0.6s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Toasts modernos */
+    .toast-container {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      z-index: 999;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .toast {
+      background: var(--color-surface-3);
+      backdrop-filter: blur(12px);
+      border-radius: 50px;
+      padding: 12px 20px;
+      border: 1px solid var(--color-border);
+      box-shadow: 0 8px 20px rgba(0,0,0,0.4);
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-weight: 500;
+      animation: slideInRight 0.25s ease;
+      color: var(--color-text);
+    }
+
+    .toast.success {
+      border-left: 4px solid var(--color-success);
+    }
+    .toast.error {
+      border-left: 4px solid var(--color-danger);
+    }
+    .toast i {
+      font-size: 1.1rem;
+    }
+    .toast.success i {
+      color: var(--color-success);
+    }
+    .toast.error i {
+      color: var(--color-danger);
+    }
+
+    @keyframes slideInRight {
+      from {
+        opacity: 0;
+        transform: translateX(60px);
+      }
+      to {
+        opacity: 1;
+        transform: translateX(0);
+      }
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(5px);}
+      to { opacity: 1; transform: translateY(0);}
+    }
+
+    @media (max-width: 480px) {
+      .login-card {
+        padding: 1.5rem;
+      }
+      .login-title {
+        font-size: 1.5rem;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div class="login-container">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="login-logo-icon">
+        <i class="fa-solid fa-water"></i>
+      </div>
+      <div class="login-logo-text">
+        CulvertDB
+        <span>Drenaje vial inteligente</span>
+      </div>
+    </div>
+
+    <!-- título dinámico -->
+    <h1 class="login-title" id="dynamic-title">Iniciar Sesión</h1>
+    <p class="login-subtitle" id="dynamic-subtitle">Accede a tu cuenta de infraestructura</p>
+
+    <!-- alerta de error global -->
+    <div class="error-alert" id="global-error">
+      <i class="fa-solid fa-circle-exclamation"></i>
+      <span id="error-message">Error</span>
+    </div>
+
+    <!-- formulario unificado -->
+    <form id="auth-form">
+      <!-- Email siempre visible -->
+      <div class="form-group">
+        <label class="form-label" for="email">Correo electrónico</label>
+        <input type="email" id="email" class="form-input" placeholder="ingeniero@drenaje.com" autocomplete="email" required>
+      </div>
+
+      <!-- Contraseña siempre visible -->
+      <div class="form-group">
+        <label class="form-label" for="password">Contraseña</label>
+        <input type="password" id="password" class="form-input" placeholder="••••••••" autocomplete="current-password" required>
+      </div>
+
+      <!-- Campos adicionales para registro (Nombre + confirmar contraseña) -->
+      <div id="register-fields-wrapper" class="register-fields">
+        <div class="form-group">
+          <label class="form-label" for="fullname">Nombre completo</label>
+          <input type="text" id="fullname" class="form-input" placeholder="Ej: Ana Gutiérrez" autocomplete="name">
+        </div>
+        <div class="form-group">
+          <label class="form-label" for="confirm-password">Confirmar contraseña</label>
+          <input type="password" id="confirm-password" class="form-input" placeholder="Repite tu contraseña" autocomplete="off">
+        </div>
+      </div>
+
+      <button type="submit" class="action-btn" id="submit-btn">
+        <span id="btn-icon"><i class="fa-solid fa-arrow-right-to-bracket"></i></span>
+        <span id="btn-text">Iniciar Sesión</span>
+      </button>
+    </form>
+
+    <div class="toggle-mode">
+      <span id="toggle-message">¿No tienes cuenta?</span>
+      <button type="button" class="toggle-link" id="toggle-mode-btn">Registrarse</button>
+    </div>
+
+    <div class="login-footer">
+      CulvertDB © 2026 — Gestión de Drenaje Vial | Seguridad Supabase
+    </div>
+  </div>
+</div>
+
+<!-- contenedor para toasts -->
+<div class="toast-container" id="toastContainer"></div>
+
+<script>
+  // ------------------------------------------------------------------
+  // 1. CLIENTE DE AUTENTICACIÓN CONTRA EL BACKEND
+  // ------------------------------------------------------------------
+  function saveSession(data) {
+    if (!data.access_token) return;
+    localStorage.setItem("access_token", data.access_token);
+    localStorage.setItem("refresh_token", data.refresh_token || "");
+    localStorage.setItem("current_user", JSON.stringify(data.user || null));
+  }
+
+  async function authRequest(path, body) {
+    let res;
+    try {
+      res = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    } catch (err) {
+      throw new Error("Error de red. Verifica que el servidor esté activo.");
+    }
+
+    let data;
+    try { data = await res.json(); } catch { data = {}; }
+
+    if (!res.ok) {
+      throw new Error(data.detail || data.error || `Error ${res.status}`);
+    }
+
+    return data;
+  }
+  
+  // ------------------------------------------------------------------
+  // 2. ELEMENTOS DOM y ESTADO DE UI
+  // ------------------------------------------------------------------
+  let currentMode = "login";   // "login" o "register"
+  
+  const dynamicTitle = document.getElementById("dynamic-title");
+  const dynamicSubtitle = document.getElementById("dynamic-subtitle");
+  const submitBtn = document.getElementById("submit-btn");
+  const btnText = document.getElementById("btn-text");
+  const btnIcon = document.getElementById("btn-icon");
+  const toggleBtn = document.getElementById("toggle-mode-btn");
+  const toggleMessageSpan = document.getElementById("toggle-message");
+  const registerFieldsWrapper = document.getElementById("register-fields-wrapper");
+  const globalErrorDiv = document.getElementById("global-error");
+  const errorMessageSpan = document.getElementById("error-message");
+  
+  // inputs
+  const emailInput = document.getElementById("email");
+  const passwordInput = document.getElementById("password");
+  const fullnameInput = document.getElementById("fullname");
+  const confirmPasswordInput = document.getElementById("confirm-password");
+  
+  // helpers de UI
+  function setLoadingState(isLoading) {
+    if (isLoading) {
+      submitBtn.disabled = true;
+      const spinner = document.createElement("span");
+      spinner.className = "spinner";
+      spinner.id = "dynamic-spinner";
+      // Guardar contenido original
+      if (!submitBtn.querySelector("#dynamic-spinner")) {
+        const originalContent = btnIcon.innerHTML + btnText.innerText;
+        submitBtn.setAttribute("data-original", originalContent);
+        btnIcon.style.display = "none";
+        btnText.style.display = "none";
+        submitBtn.prepend(spinner);
+        btnText.innerText = " Procesando...";
+        btnText.style.display = "inline-block";
+      }
+    } else {
+      submitBtn.disabled = false;
+      const spinnerEl = document.getElementById("dynamic-spinner");
+      if (spinnerEl) spinnerEl.remove();
+      btnIcon.style.display = "inline-block";
+      btnText.style.display = "inline-block";
+      if (currentMode === "login") {
+        btnText.innerText = "Iniciar Sesión";
+        btnIcon.innerHTML = '<i class="fa-solid fa-arrow-right-to-bracket"></i>';
+      } else {
+        btnText.innerText = "Crear cuenta";
+        btnIcon.innerHTML = '<i class="fa-solid fa-user-plus"></i>';
+      }
+    }
+  }
+  
+  function showError(message) {
+    errorMessageSpan.innerText = message;
+    globalErrorDiv.classList.add("show");
+    setTimeout(() => {
+      globalErrorDiv.classList.remove("show");
+    }, 4000);
+  }
+  
+  function clearError() {
+    globalErrorDiv.classList.remove("show");
+  }
+  
+  // Toasts personalizados
+  function showToast(message, type = "success") {
+    const container = document.getElementById("toastContainer");
+    const toast = document.createElement("div");
+    toast.className = `toast ${type}`;
+    const icon = type === "success" ? '<i class="fa-solid fa-circle-check"></i>' : '<i class="fa-solid fa-triangle-exclamation"></i>';
+    toast.innerHTML = `${icon}<span>${message}</span>`;
+    container.appendChild(toast);
+    setTimeout(() => {
+      toast.style.opacity = "0";
+      toast.style.transform = "translateX(50px)";
+      setTimeout(() => toast.remove(), 300);
+    }, 4000);
+  }
+  
+  // Actualizar UI según modo (login / register)
+  function updateUIMode() {
+    clearError();
+    if (currentMode === "login") {
+      dynamicTitle.innerText = "Iniciar Sesión";
+      dynamicSubtitle.innerText = "Accede a tu panel de drenaje vial";
+      btnText.innerText = "Iniciar Sesión";
+      btnIcon.innerHTML = '<i class="fa-solid fa-arrow-right-to-bracket"></i>';
+      toggleMessageSpan.innerText = "¿No tienes cuenta?";
+      toggleBtn.innerText = "Registrarse";
+      registerFieldsWrapper.classList.remove("show");
+      // quitar required de campos adicionales
+      fullnameInput.removeAttribute("required");
+      confirmPasswordInput.removeAttribute("required");
+    } else {
+      dynamicTitle.innerText = "Crear cuenta";
+      dynamicSubtitle.innerText = "Regístrate para gestionar infraestructura";
+      btnText.innerText = "Crear cuenta";
+      btnIcon.innerHTML = '<i class="fa-solid fa-user-plus"></i>';
+      toggleMessageSpan.innerText = "¿Ya tienes cuenta?";
+      toggleBtn.innerText = "Iniciar Sesión";
+      registerFieldsWrapper.classList.add("show");
+      // no requerimos nombre estricto pero sugerimos
+      fullnameInput.setAttribute("required", "required");
+      confirmPasswordInput.setAttribute("required", "required");
+    }
+  }
+  
+  // Alternar entre login y registro
+  function toggleMode() {
+    currentMode = currentMode === "login" ? "register" : "login";
+    updateUIMode();
+    // limpiar campos y errores
+    document.getElementById("auth-form").reset();
+    clearError();
+  }
+  
+  // ------------------------------------------------------------------
+  // 3. FUNCIONES DE AUTENTICACIÓN
+  // ------------------------------------------------------------------
+  async function handleLogin(email, password) {
+    const data = await authRequest("/api/auth/login", {
+      email: email.trim(),
+      password: password,
+    });
+    saveSession(data);
+    return data;
+  }
+  
+  async function handleRegister(email, password, fullName) {
+    if (password !== confirmPasswordInput.value) {
+      throw new Error("Las contraseñas no coinciden");
+    }
+    if (password.length < 6) {
+      throw new Error("La contraseña debe tener al menos 6 caracteres");
+    }
+    const data = await authRequest("/api/auth/register", {
+      email: email.trim(),
+      password: password,
+      nombre: fullName || "",
+    });
+    saveSession(data);
+    return data;
+  }
+  
+  // Submit principal
+  async function onSubmit(event) {
+    event.preventDefault();
+    clearError();
+    
+    const email = emailInput.value.trim();
+    const password = passwordInput.value;
+    
+    if (!email || !password) {
+      showError("❌ Correo y contraseña son obligatorios");
+      return;
+    }
+    
+    if (currentMode === "login") {
+      setLoadingState(true);
+      try {
+        const sessionData = await handleLogin(email, password);
+        showToast(`✅ Bienvenido, ${sessionData.user?.email || "usuario"}`, "success");
+        setTimeout(() => {
+          window.location.href = "/";
+        }, 800);
+      } catch (err) {
+        console.error(err);
+        let errorMsg = err.message;
+        if (errorMsg.includes("Invalid login credentials")) errorMsg = "Correo o contraseña incorrectos";
+        else if (errorMsg.includes("Email not confirmed")) errorMsg = "Confirma tu correo antes de iniciar sesión";
+        showError(errorMsg);
+        setLoadingState(false);
+      }
+    } 
+    else { 
+      // modo REGISTRO
+      const fullName = fullnameInput.value.trim();
+      const confirmPass = confirmPasswordInput.value;
+      
+      if (password !== confirmPass) {
+        showError("✋ Las contraseñas no coinciden");
+        return;
+      }
+      if (password.length < 6) {
+        showError("🔐 La contraseña debe tener mínimo 6 caracteres");
+        return;
+      }
+      
+      setLoadingState(true);
+      try {
+        const signUpData = await handleRegister(email, password, fullName);
+        
+        if (signUpData.requires_email_confirmation || !signUpData.access_token) {
+          showToast("📧 Revisa tu correo y confirma la cuenta. Luego inicia sesión.", "success");
+          setTimeout(() => {
+            if (currentMode === "register") {
+              toggleMode();
+              showToast("✨ Ahora puedes iniciar sesión con tu cuenta confirmada", "success");
+            }
+          }, 2500);
+        } else {
+          showToast("🎉 ¡Cuenta creada con éxito! Redirigiendo...", "success");
+          setTimeout(() => {
+            window.location.href = "/";
+          }, 1200);
+        }
+        setLoadingState(false);
+        document.getElementById("auth-form").reset();
+      } catch (err) {
+        setLoadingState(false);
+        let friendlyError = err.message;
+        if (friendlyError.includes("User already registered")) friendlyError = "El correo ya está registrado. Usa 'Iniciar Sesión'.";
+        else if (friendlyError.includes("Password should be at least")) friendlyError = "La contraseña es demasiado débil, mínimo 6 caracteres.";
+        showError(friendlyError);
+        console.error(err);
+      }
+    }
+  }
+  
+  // ------------------------------------------------------------------
+  // 4. VERIFICAR SESIÓN ACTIVA Y REDIRIGIR SI YA ESTÁ AUTENTICADO
+  // ------------------------------------------------------------------
+  async function checkActiveSessionAndRedirect() {
+    if (localStorage.getItem("access_token")) {
+      window.location.href = "/";
+    }
+  }
+  
+  // Listener del formulario
+  const form = document.getElementById("auth-form");
+  form.addEventListener("submit", onSubmit);
+  toggleBtn.addEventListener("click", toggleMode);
+  
+  // Inicializar UI según modo por defecto (login)
+  updateUIMode();
+  
+  // Verificar si ya existe sesión activa para no mostrar login innecesario
+  checkActiveSessionAndRedirect();
+  
+  // Mejora visual: si el usuario intenta enviar con enter funciona correctamente.
+  // pequeños adornos: botón activo, limpieza de errores al escribir
+  emailInput.addEventListener("input", () => clearError());
+  passwordInput.addEventListener("input", () => clearError());
+  if (fullnameInput) fullnameInput.addEventListener("input", () => clearError());
+  if (confirmPasswordInput) confirmPasswordInput.addEventListener("input", () => clearError());
+  
+</script>
+</body>
+</html>
