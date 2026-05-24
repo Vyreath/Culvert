@@ -1,5 +1,6 @@
-flask
+Flask
 flask-cors
-python-dotenv
 supabase
-gunicorn
+python-dotenv
+openpyxl
+reportlab
