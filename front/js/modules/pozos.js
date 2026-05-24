@@ -1,6 +1,15 @@
 const PozosUI = (() => {
   const state = { filterAlcId: '' };
 
+  function escapeHTML(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  }
+
   async function load() {
     const tbody = document.getElementById('tbody-pozos');
     if (!tbody) return;
@@ -9,7 +18,7 @@ const PozosUI = (() => {
       const data = await API.getPozos(state.filterAlcId);
       renderRows(data || []);
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--color-danger)">${err.message}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--color-danger)">${escapeHTML(err.message)}</td></tr>`;
       Toast.error(err.message);
     }
   }
@@ -22,10 +31,10 @@ const PozosUI = (() => {
     }
     tbody.innerHTML = rows.map(r => `
       <tr>
-        <td>${r.id}</td>
-        <td>${r.alcantarilla_id || '—'}</td>
-        <td>${r.profundidad || '—'}</td>
-        <td>${r.diametro || '—'}</td>
+        <td>${escapeHTML(r.id)}</td>
+        <td>${escapeHTML(r.alcantarilla_id ?? '—')}</td>
+        <td>${escapeHTML(r.profundidad ?? '—')}</td>
+        <td>${escapeHTML(r.ancho ?? '—')} × ${escapeHTML(r.largo ?? '—')}</td>
         <td>${badgeEstado(r.estados?.nombre)}</td>
         <td>
           <div class="table-actions">
@@ -42,19 +51,23 @@ const PozosUI = (() => {
         <div class="form-grid">
           <div class="form-group">
             <label class="form-label" for="alcantarilla_id">Alcantarilla ID</label>
-            <input class="form-control" id="alcantarilla_id" name="alcantarilla_id" type="number" value="${row.alcantarilla_id || ''}" required>
+            <input class="form-control" id="alcantarilla_id" name="alcantarilla_id" type="number" value="${escapeHTML(row.alcantarilla_id ?? '')}" required>
           </div>
           <div class="form-group">
             <label class="form-label" for="estado_id">Estado ID</label>
-            <input class="form-control" id="estado_id" name="estado_id" type="number" value="${row.estado_id || ''}">
+            <input class="form-control" id="estado_id" name="estado_id" type="number" value="${escapeHTML(row.estado_id ?? '')}">
           </div>
           <div class="form-group">
-            <label class="form-label" for="profundidad">Profundidad</label>
-            <input class="form-control" id="profundidad" name="profundidad" value="${row.profundidad || ''}">
+            <label class="form-label" for="profundidad">Profundidad (m)</label>
+            <input class="form-control" id="profundidad" name="profundidad" value="${escapeHTML(row.profundidad ?? '')}">
           </div>
           <div class="form-group">
-            <label class="form-label" for="diametro">Diámetro</label>
-            <input class="form-control" id="diametro" name="diametro" value="${row.diametro || ''}">
+            <label class="form-label" for="ancho">Ancho (m)</label>
+            <input class="form-control" id="ancho" name="ancho" value="${escapeHTML(row.ancho ?? '')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="largo">Largo (m)</label>
+            <input class="form-control" id="largo" name="largo" value="${escapeHTML(row.largo ?? '')}">
           </div>
         </div>
       </form>`;
@@ -73,7 +86,9 @@ const PozosUI = (() => {
           e.preventDefault();
           const form = e.target;
           const payload = Object.fromEntries(new FormData(form).entries());
-          ['alcantarilla_id','estado_id'].forEach(k => { if(payload[k]) payload[k] = Number(payload[k]); });
+          ['alcantarilla_id','estado_id'].forEach(k => { if(payload[k] !== '') payload[k] = Number(payload[k]); });
+          ['profundidad','ancho','largo'].forEach(k => { if(payload[k] !== '') payload[k] = Number(payload[k]); });
+          Object.keys(payload).forEach(k => { if (payload[k] === '') delete payload[k]; });
           Modal.setLoading('pozo-form', true);
           try {
             if (editing) {
@@ -95,13 +110,11 @@ const PozosUI = (() => {
 
   async function edit(id) {
     try {
-      const res = await fetch(`/api/pozos_recoleccion/${id}`, {
-        headers: { Authorization: `Bearer ${Auth.getToken()}` }
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Error');
+      const data = await API.getPozo(id);
       openForm(data);
-    } catch (err) { Toast.error('Error al cargar: ' + err.message); }
+    } catch (err) {
+      Toast.error('Error al cargar: ' + err.message);
+    }
   }
 
   function remove(id) {

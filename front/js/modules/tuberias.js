@@ -1,6 +1,15 @@
 const TuberiasUI = (() => {
   const state = { filterAlcId: '' };
 
+  function escapeHTML(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  }
+
   async function load() {
     const tbody = document.getElementById('tbody-tuberias');
     if (!tbody) return;
@@ -9,7 +18,7 @@ const TuberiasUI = (() => {
       const data = await API.getTuberias(state.filterAlcId);
       renderRows(data || []);
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--color-danger)">${err.message}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--color-danger)">${escapeHTML(err.message)}</td></tr>`;
       Toast.error(err.message);
     }
   }
@@ -22,11 +31,11 @@ const TuberiasUI = (() => {
     }
     tbody.innerHTML = rows.map(r => `
       <tr>
-        <td>${r.id}</td>
-        <td>${r.alcantarilla_id || '—'}</td>
-        <td>${r.materiales?.nombre || '—'}</td>
-        <td>${r.diametro || '—'}</td>
-        <td>${r.longitud || '—'}</td>
+        <td>${escapeHTML(r.id)}</td>
+        <td>${escapeHTML(r.alcantarilla_id ?? '—')}</td>
+        <td>${escapeHTML(r.materiales?.nombre ?? '—')}</td>
+        <td>${escapeHTML(r.diametro ?? '—')}</td>
+        <td>${escapeHTML(r.longitud ?? '—')}</td>
         <td>${badgeEstado(r.estados?.nombre)}</td>
         <td>
           <div class="table-actions">
@@ -43,23 +52,23 @@ const TuberiasUI = (() => {
         <div class="form-grid">
           <div class="form-group">
             <label class="form-label" for="alcantarilla_id">Alcantarilla ID</label>
-            <input class="form-control" id="alcantarilla_id" name="alcantarilla_id" type="number" value="${row.alcantarilla_id || ''}" required>
+            <input class="form-control" id="alcantarilla_id" name="alcantarilla_id" type="number" value="${escapeHTML(row.alcantarilla_id ?? '')}" required>
           </div>
           <div class="form-group">
             <label class="form-label" for="material_id">Material ID</label>
-            <input class="form-control" id="material_id" name="material_id" type="number" value="${row.material_id || ''}">
+            <input class="form-control" id="material_id" name="material_id" type="number" value="${escapeHTML(row.material_id ?? '')}">
           </div>
           <div class="form-group">
             <label class="form-label" for="estado_id">Estado ID</label>
-            <input class="form-control" id="estado_id" name="estado_id" type="number" value="${row.estado_id || ''}">
+            <input class="form-control" id="estado_id" name="estado_id" type="number" value="${escapeHTML(row.estado_id ?? '')}">
           </div>
           <div class="form-group">
             <label class="form-label" for="diametro">Diámetro</label>
-            <input class="form-control" id="diametro" name="diametro" value="${row.diametro || ''}">
+            <input class="form-control" id="diametro" name="diametro" value="${escapeHTML(row.diametro ?? '')}">
           </div>
           <div class="form-group">
             <label class="form-label" for="longitud">Longitud</label>
-            <input class="form-control" id="longitud" name="longitud" value="${row.longitud || ''}">
+            <input class="form-control" id="longitud" name="longitud" value="${escapeHTML(row.longitud ?? '')}">
           </div>
         </div>
       </form>`;
@@ -78,7 +87,9 @@ const TuberiasUI = (() => {
           e.preventDefault();
           const form = e.target;
           const payload = Object.fromEntries(new FormData(form).entries());
-          ['alcantarilla_id','material_id','estado_id'].forEach(k => { if(payload[k]) payload[k] = Number(payload[k]); });
+          ['alcantarilla_id','material_id','estado_id'].forEach(k => { if(payload[k] !== '') payload[k] = Number(payload[k]); });
+          ['diametro','longitud'].forEach(k => { if(payload[k] !== '') payload[k] = Number(payload[k]); });
+          Object.keys(payload).forEach(k => { if (payload[k] === '') delete payload[k]; });
           Modal.setLoading('tuberia-form', true);
           try {
             if (editing) {
@@ -100,13 +111,11 @@ const TuberiasUI = (() => {
 
   async function edit(id) {
     try {
-      const res = await fetch(`/api/tuberias/${id}`, {
-        headers: { Authorization: `Bearer ${Auth.getToken()}` }
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Error');
+      const data = await API.getTuberia(id);
       openForm(data);
-    } catch (err) { Toast.error('Error al cargar: ' + err.message); }
+    } catch (err) {
+      Toast.error('Error al cargar: ' + err.message);
+    }
   }
 
   function remove(id) {
@@ -115,8 +124,12 @@ const TuberiasUI = (() => {
       message: '¿Estás seguro?',
       danger: true,
       onConfirm: async () => {
-        try { await API.deleteTuberia(id); Toast.success('Tubería eliminada'); load(); Dashboard.reload?.(); }
-        catch (err) { Toast.error(err.message); }
+        try {
+          await API.deleteTuberia(id);
+          Toast.success('Tubería eliminada');
+          load();
+          if (typeof Dashboard !== 'undefined') Dashboard.reload();
+        } catch (err) { Toast.error(err.message); }
       }
     });
   }

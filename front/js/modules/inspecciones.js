@@ -1,6 +1,15 @@
 const InspeccionesUI = (() => {
   const state = { filterAlcId: '' };
 
+  function escapeHTML(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
+  }
+
   async function load() {
     const tbody = document.getElementById('tbody-inspecciones-page');
     if (!tbody) return;
@@ -9,7 +18,7 @@ const InspeccionesUI = (() => {
       const data = await API.getInspecciones(state.filterAlcId);
       renderRows(data || []);
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--color-danger)">${err.message}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--color-danger)">${escapeHTML(err.message)}</td></tr>`;
       Toast.error(err.message);
     }
   }
@@ -22,11 +31,11 @@ const InspeccionesUI = (() => {
     }
     tbody.innerHTML = rows.map(r => `
       <tr>
-        <td>${r.id}</td>
-        <td>${r.alcantarilla_id || '—'}</td>
-        <td>${fmtDate(r.fecha)}</td>
-        <td>${r.inspector || '—'}</td>
-        <td>${r.observaciones || '—'}</td>
+        <td>${escapeHTML(r.id)}</td>
+        <td>${escapeHTML(r.alcantarilla_id ?? '—')}</td>
+        <td>${escapeHTML(fmtDate(r.fecha))}</td>
+        <td>${escapeHTML(r.inspector ?? '—')}</td>
+        <td>${escapeHTML(r.observaciones ?? '—')}</td>
         <td>
           <div class="table-actions">
             <button class="btn btn-secondary btn-icon" title="Editar" onclick="InspeccionesUI.edit(${r.id})"><i class="fa-solid fa-pen"></i></button>
@@ -42,19 +51,19 @@ const InspeccionesUI = (() => {
         <div class="form-grid">
           <div class="form-group">
             <label class="form-label" for="alcantarilla_id">Alcantarilla ID <span class="required">*</span></label>
-            <input class="form-control" id="alcantarilla_id" name="alcantarilla_id" type="number" value="${row.alcantarilla_id || ''}" required>
+            <input class="form-control" id="alcantarilla_id" name="alcantarilla_id" type="number" value="${escapeHTML(row.alcantarilla_id ?? '')}" required>
           </div>
           <div class="form-group">
             <label class="form-label" for="fecha">Fecha <span class="required">*</span></label>
-            <input class="form-control" id="fecha" name="fecha" type="date" value="${row.fecha ? row.fecha.substring(0,10) : ''}"required>
+            <input class="form-control" id="fecha" name="fecha" type="date" value="${row.fecha ? row.fecha.substring(0,10) : ''}" required>
           </div>
           <div class="form-group">
             <label class="form-label" for="inspector">Inspector</label>
-            <input class="form-control" id="inspector" name="inspector" value="${row.inspector || ''}">
+            <input class="form-control" id="inspector" name="inspector" value="${escapeHTML(row.inspector ?? '')}">
           </div>
           <div class="form-group full">
             <label class="form-label" for="observaciones">Observaciones</label>
-            <textarea class="form-control" id="observaciones" name="observaciones" rows="3">${row.observaciones || ''}</textarea>
+            <textarea class="form-control" id="observaciones" name="observaciones" rows="3">${escapeHTML(row.observaciones ?? '')}</textarea>
           </div>
         </div>
       </form>`;
@@ -73,7 +82,8 @@ const InspeccionesUI = (() => {
           e.preventDefault();
           const form = e.target;
           const payload = Object.fromEntries(new FormData(form).entries());
-          if (payload.alcantarilla_id) payload.alcantarilla_id = Number(payload.alcantarilla_id);
+          if (payload.alcantarilla_id !== '') payload.alcantarilla_id = Number(payload.alcantarilla_id);
+          Object.keys(payload).forEach(k => { if (payload[k] === '') delete payload[k]; });
           Modal.setLoading('inspeccion-form', true);
           try {
             if (editing) {
@@ -93,9 +103,9 @@ const InspeccionesUI = (() => {
     });
   }
 
- async function edit(id) {
+  async function edit(id) {
     try {
-      const data = await API.get(`/api/inspecciones/${id}`);
+      const data = await API.getInspeccion(id);
       openForm(data);
     } catch (err) {
       Toast.error('Error al cargar: ' + err.message);

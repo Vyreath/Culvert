@@ -61,25 +61,28 @@ const API = (() => {
 
     // Tuberías
     getTuberias: (alc_id) => API.get('/api/tuberias', { alcantarilla_id: alc_id }),
+    getTuberia: (id) => API.get(`/api/tuberias/${id}`),
     createTuberia: (body) => API.post('/api/tuberias', body),
     updateTuberia: (id, body) => API.put(`/api/tuberias/${id}`, body),
     deleteTuberia: (id) => API.delete(`/api/tuberias/${id}`),
 
     // Muros
     getMuros: (alc_id) => API.get('/api/muros', { alcantarilla_id: alc_id }),
+    getMuro: (id) => API.get(`/api/muros/${id}`),
     createMuro: (body) => API.post('/api/muros', body),
     updateMuro: (id, body) => API.put(`/api/muros/${id}`, body),
     deleteMuro: (id) => API.delete(`/api/muros/${id}`),
 
     // Pozos
     getPozos: (alc_id) => API.get('/api/pozos_recoleccion', { alcantarilla_id: alc_id }),
+    getPozo: (id) => API.get(`/api/pozos_recoleccion/${id}`),
     createPozo: (body) => API.post('/api/pozos_recoleccion', body),
     updatePozo: (id, body) => API.put(`/api/pozos_recoleccion/${id}`, body),
     deletePozo: (id) => API.delete(`/api/pozos_recoleccion/${id}`),
 
     // Inspecciones
-    getInspecciones: (alc_id) => API.get('/api/inspecciones', alc_id ? { alcantarilla_id: alc_id }: {}),
-    getInspeccion: (id) =>API.get(`/api/inspecciones/${id}`),
+    getInspecciones: (alc_id) => API.get('/api/inspecciones', alc_id ? { alcantarilla_id: alc_id } : {}),
+    getInspeccion: (id) => API.get(`/api/inspecciones/${id}`),
     createInspeccion: (body) => API.post('/api/inspecciones', body),
     updateInspeccion: (id, body) => API.put(`/api/inspecciones/${id}`, body),
     deleteInspeccion: (id) => API.delete(`/api/inspecciones/${id}`),
