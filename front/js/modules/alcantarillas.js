@@ -23,6 +23,7 @@ const AlcantarillasUI = (() => {
     { name: 'coordenada_este', label: 'Coordenada este', type: 'number', step: 'any' },
     { name: 'coordenada_norte', label: 'Coordenada norte', type: 'number', step: 'any' },
     { name: 'observaciones', label: 'Observaciones', textarea: true, full: true },
+    { name: 'imagen_url', label: 'Link de imagen', full: true },
   ];
 
   function escapeHTML(value) {
@@ -42,7 +43,7 @@ const AlcantarillasUI = (() => {
     const tbody = document.getElementById('tbody-alcantarillas');
     if (!tbody) return;
 
-    skeletonRows(tbody, 8, 5);
+    skeletonRows(tbody, 9, 5);
 
     try {
       const response = await API.getAlcantarillas({
@@ -56,7 +57,7 @@ const AlcantarillasUI = (() => {
       renderRows(response.data || []);
       renderPagination();
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--color-danger)">
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--color-danger)">
         ${escapeHTML(err.message)}
       </td></tr>`;
       Toast.error('No se pudieron cargar las alcantarillas: ' + err.message);
@@ -68,7 +69,7 @@ const AlcantarillasUI = (() => {
     if (!tbody) return;
 
     if (!rows.length) {
-      tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:24px;color:var(--color-text-muted)">
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:24px;color:var(--color-text-muted)">
         No hay alcantarillas para mostrar
       </td></tr>`;
       return;
@@ -83,6 +84,13 @@ const AlcantarillasUI = (() => {
         <td>${escapeHTML(valueOrDash(row.parroquia))}</td>
         <td><span class="mono">${escapeHTML(fmtDate(row.fecha))}</span></td>
         <td>${escapeHTML(valueOrDash(row.tramo_vial))}</td>
+        <td>
+          ${row.imagen_url 
+            ? `<a href="${escapeHTML(row.imagen_url)}" target="_blank" title="Ver imagen">
+                 <img src="${escapeHTML(row.imagen_url)}" style="height:30px;border-radius:4px;object-fit:cover" onerror="this.style.display='none'">
+               </a>` 
+            : '—'}
+        </td>
         <td>
           <div class="table-actions" style="opacity:1">
             <button class="btn btn-secondary btn-icon" title="Editar" onclick="AlcantarillasUI.edit(${row.id})">
