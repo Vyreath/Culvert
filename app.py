@@ -630,30 +630,35 @@ def dashboard_kpis():
 def mapa_puntos():
     provincia = request.args.get("provincia")
 
-    # Usar ST_Transform para convertir de EPSG:32717 (UTM zona 17 sur) a EPSG:4326 (WGS84)
+    # Seleccionamos solo las columnas necesarias, incluyendo coordenadas UTM
     query = supabase.table("alcantarillas").select(
-        "id, ficha_numero, ubicacion, canton, provincia, tramo_vial, "
-        "ST_X(ST_Transform(geom, 4326)) as lng, "
-        "ST_Y(ST_Transform(geom, 4326)) as lat"
-    ).not_.is_("geom", "null")
+        "id, ficha_numero, ubicacion, canton, provincia, tramo_vial, coordenada_este, coordenada_norte"
+    )
 
     if provincia:
         query = query.ilike("provincia", f"%{provincia}%")
 
+    # Solo registros con ambas coordenadas no nulas
+    query = query.not_.is_("coordenada_este", "null").not_.is_("coordenada_norte", "null")
     rows = query.limit(2000).execute().data
 
     features = []
     for r in rows:
-        lng = r.get("lng")
-        lat = r.get("lat")
-        if lng is None or lat is None:
+        este = r.get("coordenada_este")
+        norte = r.get("coordenada_norte")
+
+        # Verificación de seguridad
+        try:
+            este = float(este)
+            norte = float(norte)
+        except (TypeError, ValueError):
             continue
 
         features.append({
             "type": "Feature",
             "geometry": {
                 "type": "Point",
-                "coordinates": [float(lng), float(lat)]
+                "coordinates": [este, norte]      # UTM (este, norte)
             },
             "properties": {
                 "id": r.get("id"),
@@ -662,7 +667,7 @@ def mapa_puntos():
                 "canton": r.get("canton"),
                 "provincia": r.get("provincia"),
                 "tramo_vial": r.get("tramo_vial"),
-                "projection": "wgs84"
+                "projection": "utm"               # <-- ¡clave para el frontend!
             }
         })
 
