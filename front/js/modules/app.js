@@ -90,14 +90,51 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  /* ── Exportar desde topbar ── */
-  window.exportExcel = () => {
-    Toast.info('Generando Excel…');
-    window.open('/api/export/alcantarillas/excel', '_blank');
+  /* ── Exportar desde topbar (CORREGIDO: fetch + blob con autenticación) ── */
+  window.exportExcel = async () => {
+    try {
+      const token = Auth.getToken();
+      const res = await fetch('/api/export/alcantarillas/excel', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: `Error ${res.status}` }));
+        throw new Error(err.detail || 'Error al generar Excel');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'alcantarillas.xlsx';
+      a.click();
+      URL.revokeObjectURL(url);
+      Toast.success('Excel descargado');
+    } catch (err) {
+      Toast.error(err.message);
+    }
   };
-  window.exportPDF = () => {
-    Toast.info('Generando PDF…');
-    window.open('/api/export/alcantarillas/pdf', '_blank');
+
+  window.exportPDF = async () => {
+    try {
+      const token = Auth.getToken();
+      const res = await fetch('/api/export/alcantarillas/pdf', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: `Error ${res.status}` }));
+        throw new Error(err.detail || 'Error al generar PDF');
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'alcantarillas.pdf';
+      a.click();
+      URL.revokeObjectURL(url);
+      Toast.success('PDF descargado');
+    } catch (err) {
+      Toast.error(err.message);
+    }
   };
 
   /* ── Escape cierra modales ── */

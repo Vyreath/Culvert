@@ -9,9 +9,18 @@ const MurosUI = (() => {
       const data = await API.getMuros(state.filterAlcId);
       renderRows(data || []);
     } catch (err) {
-      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--color-danger)">${err.message}</td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="7" style="text-align:center;color:var(--color-danger)">${escapeHTML(err.message)}</td></tr>`;
       Toast.error(err.message);
     }
+  }
+
+  function escapeHTML(value) {
+    return String(value ?? '')
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;')
+      .replaceAll("'", '&#039;');
   }
 
   function renderRows(rows) {
@@ -22,11 +31,11 @@ const MurosUI = (() => {
     }
     tbody.innerHTML = rows.map(r => `
       <tr>
-        <td>${r.id}</td>
-        <td>${r.alcantarilla_id || '—'}</td>
-        <td>${r.materiales?.nombre || '—'}</td>
-        <td>${r.altura || '—'}</td>
-        <td>${r.longitud || '—'}</td>
+        <td>${escapeHTML(r.id)}</td>
+        <td>${escapeHTML(r.alcantarilla_id ?? '—')}</td>
+        <td>${escapeHTML(r.materiales?.nombre ?? '—')}</td>
+        <td>${escapeHTML(r.alto ?? '—')}</td>
+        <td>${escapeHTML(r.longitud ?? '—')}</td>
         <td>${badgeEstado(r.estados?.nombre)}</td>
         <td>
           <div class="table-actions">
@@ -43,23 +52,31 @@ const MurosUI = (() => {
         <div class="form-grid">
           <div class="form-group">
             <label class="form-label" for="alcantarilla_id">Alcantarilla ID</label>
-            <input class="form-control" id="alcantarilla_id" name="alcantarilla_id" type="number" value="${row.alcantarilla_id || ''}" required>
+            <input class="form-control" id="alcantarilla_id" name="alcantarilla_id" type="number" value="${escapeHTML(row.alcantarilla_id ?? '')}" required>
           </div>
           <div class="form-group">
             <label class="form-label" for="material_id">Material ID</label>
-            <input class="form-control" id="material_id" name="material_id" type="number" value="${row.material_id || ''}">
+            <input class="form-control" id="material_id" name="material_id" type="number" value="${escapeHTML(row.material_id ?? '')}">
           </div>
           <div class="form-group">
             <label class="form-label" for="estado_id">Estado ID</label>
-            <input class="form-control" id="estado_id" name="estado_id" type="number" value="${row.estado_id || ''}">
+            <input class="form-control" id="estado_id" name="estado_id" type="number" value="${escapeHTML(row.estado_id ?? '')}">
           </div>
           <div class="form-group">
-            <label class="form-label" for="altura">Altura</label>
-            <input class="form-control" id="altura" name="altura" value="${row.altura || ''}">
+            <label class="form-label" for="alto">Altura (m)</label>
+            <input class="form-control" id="alto" name="alto" value="${escapeHTML(row.alto ?? '')}">
           </div>
           <div class="form-group">
-            <label class="form-label" for="longitud">Longitud</label>
-            <input class="form-control" id="longitud" name="longitud" value="${row.longitud || ''}">
+            <label class="form-label" for="longitud">Longitud (m)</label>
+            <input class="form-control" id="longitud" name="longitud" value="${escapeHTML(row.longitud ?? '')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="ancho">Ancho (m)</label>
+            <input class="form-control" id="ancho" name="ancho" value="${escapeHTML(row.ancho ?? '')}">
+          </div>
+          <div class="form-group">
+            <label class="form-label" for="espesor">Espesor (m)</label>
+            <input class="form-control" id="espesor" name="espesor" value="${escapeHTML(row.espesor ?? '')}">
           </div>
         </div>
       </form>`;
@@ -78,7 +95,11 @@ const MurosUI = (() => {
           e.preventDefault();
           const form = e.target;
           const payload = Object.fromEntries(new FormData(form).entries());
-          ['alcantarilla_id','material_id','estado_id'].forEach(k => { if(payload[k]) payload[k] = Number(payload[k]); });
+          // Convertir a número los campos que correspondan
+          ['alcantarilla_id','material_id','estado_id'].forEach(k => { if(payload[k] !== '') payload[k] = Number(payload[k]); });
+          ['alto','longitud','ancho','espesor'].forEach(k => { if(payload[k] !== '') payload[k] = Number(payload[k]); });
+          // Eliminar campos vacíos
+          Object.keys(payload).forEach(k => { if (payload[k] === '') delete payload[k]; });
           Modal.setLoading('muro-form', true);
           try {
             if (editing) {
@@ -100,13 +121,11 @@ const MurosUI = (() => {
 
   async function edit(id) {
     try {
-      const res = await fetch(`/muros/${id}`, {
-        headers: { Authorization: `Bearer ${Auth.getToken()}` }
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail || 'Error');
+      const data = await API.get(`/api/muros/${id}`);
       openForm(data);
-    } catch (err) { Toast.error('Error al cargar: ' + err.message); }
+    } catch (err) {
+      Toast.error('Error al cargar: ' + err.message);
+    }
   }
 
   function remove(id) {

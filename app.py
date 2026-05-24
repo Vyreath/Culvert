@@ -1,12 +1,19 @@
 import os, csv, io
 from datetime import datetime
 from pathlib import Path
+from io import BytesIO
 
 from dotenv import load_dotenv
 from flask import Flask, jsonify, request, send_from_directory, Response, g
 from flask_cors import CORS
 from supabase import create_client
 from functools import wraps
+
+from openpyxl import Workbook
+from openpyxl.utils import get_column_letter
+from reportlab.lib import colors
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
 
 BASE_DIR = Path(__file__).resolve().parent
 ENV_PATH = BASE_DIR / ".env"
@@ -24,7 +31,6 @@ supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
 supabase_admin = create_client(SUPABASE_URL, SUPABASE_KEY)  # mismo cliente con service_role
 
 FRONT_DIR = Path(os.getenv("FRONT_DIR", BASE_DIR / "front")).resolve()
-
 
 print("BASE_DIR =", BASE_DIR)
 print("FRONT_DIR =", FRONT_DIR)
@@ -61,12 +67,8 @@ def current_user_role():
     return metadata.get("role", "inspector")
 
 # ─────────────────────────────────────────────
-# FRONTEND (SPA) – resuelve .html automáticamente
+# FRONTEND (SPA)
 # ─────────────────────────────────────────────
-# ─────────────────────────────────────────────
-# FRONTEND
-# ─────────────────────────────────────────────
-
 @app.route("/")
 def index():
     return send_from_directory(FRONT_DIR, "index.html")
@@ -108,7 +110,7 @@ def js_files(filename):
     return send_from_directory(FRONT_DIR / "js", filename)
 
 # ═════════════════════════════════════════════
-# AUTENTICACIÓN  (rutas base se mantienen)
+# AUTENTICACIÓN
 # ═════════════════════════════════════════════
 DEFAULT_PERMISSIONS = {
     "alcantarillas_crear": True,
@@ -358,8 +360,7 @@ def delete_alcantarilla(id):
     return jsonify({"message": "Eliminada"}), 200
 
 # ═════════════════════════════════════════════
-# TUBERÍAS, MUROS, POZOS, INSPECCIONES, FOTOGRAFÍAS, ARCHIVOS (todos bajo /api/)
-# (Se mantiene la lógica, solo se cambia la ruta)
+# TUBERÍAS
 # ═════════════════════════════════════════════
 @app.route("/api/tuberias", methods=["GET"])
 @require_auth
@@ -622,49 +623,54 @@ def dashboard_kpis():
     })
 
 # ═════════════════════════════════════════════
-# MAPA GIS
+# MAPA GIS (CORREGIDO - Ahora transforma UTM a WGS84)
 # ═════════════════════════════════════════════
 @app.route("/api/mapa/puntos", methods=["GET"])
 @require_auth
 def mapa_puntos():
     provincia = request.args.get("provincia")
-    try:
-        query = supabase.table("alcantarillas").select(
-            "id, ficha_numero, ubicacion, canton, provincia, tramo_vial, "
-            "ST_AsGeoJSON(ST_Transform(geom, 4326))::json as geojson"
-        ).not_.is_("geom", "null")
-    except:
-        query = supabase.table("alcantarillas").select(
-            "id, ficha_numero, ubicacion, canton, provincia, tramo_vial, coordenada_este, coordenada_norte"
-        )
-    if provincia: query = query.ilike("provincia", f"%{provincia}%")
+
+    # Usar ST_Transform para convertir de EPSG:32717 (UTM zona 17 sur) a EPSG:4326 (WGS84)
+    query = supabase.table("alcantarillas").select(
+        "id, ficha_numero, ubicacion, canton, provincia, tramo_vial, "
+        "ST_X(ST_Transform(geom, 4326)) as lng, "
+        "ST_Y(ST_Transform(geom, 4326)) as lat"
+    ).not_.is_("geom", "null")
+
+    if provincia:
+        query = query.ilike("provincia", f"%{provincia}%")
+
     rows = query.limit(2000).execute().data
+
     features = []
     for r in rows:
-        if "geojson" in r and r["geojson"] and "coordinates" in r["geojson"]:
-            coords = r["geojson"]["coordinates"]
-        elif "coordenada_este" in r and r["coordenada_este"] and r["coordenada_norte"]:
-            coords = [r["coordenada_este"], r["coordenada_norte"]]
-            r["projection"] = "utm"
-        else:
+        lng = r.get("lng")
+        lat = r.get("lat")
+        if lng is None or lat is None:
             continue
+
         features.append({
             "type": "Feature",
             "geometry": {
                 "type": "Point",
-                "coordinates": coords
+                "coordinates": [float(lng), float(lat)]
             },
             "properties": {
-                "id": r["id"],
+                "id": r.get("id"),
                 "ficha": r.get("ficha_numero"),
                 "ubicacion": r.get("ubicacion"),
                 "canton": r.get("canton"),
                 "provincia": r.get("provincia"),
                 "tramo_vial": r.get("tramo_vial"),
-                "projection": r.get("projection", "wgs84")
+                "projection": "wgs84"
             }
         })
-    return jsonify({"type": "FeatureCollection", "features": features, "total": len(features)})
+
+    return jsonify({
+        "type": "FeatureCollection",
+        "features": features,
+        "total": len(features)
+    })
 
 # ═════════════════════════════════════════════
 # EXPORTACIONES
@@ -673,20 +679,93 @@ def mapa_puntos():
 @require_auth
 def export_excel():
     rows = supabase.table("alcantarillas").select("*").order("ficha_numero").execute().data
-    si = io.StringIO()
-    cw = csv.writer(si)
-    cw.writerow(["ID","Ficha","Ubicación","Parroquia","Cantón","Provincia","Fecha","Tramo Vial","Universidad"])
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Alcantarillas"
+
+    headers = ["ID", "Ficha", "Ubicación", "Parroquia", "Cantón", "Provincia",
+               "Fecha", "Tramo Vial", "Universidad"]
+    ws.append(headers)
+
     for r in rows:
-        cw.writerow([r.get("id"), r.get("ficha_numero"), r.get("ubicacion"), r.get("parroquia"),
-                     r.get("canton"), r.get("provincia"), r.get("fecha"), r.get("tramo_vial"),
-                     r.get("universidad")])
-    output = si.getvalue()
-    return Response(output, mimetype="text/csv", headers={"Content-Disposition": "attachment;filename=alcantarillas.csv"})
+        ws.append([
+            r.get("id"),
+            r.get("ficha_numero"),
+            r.get("ubicacion"),
+            r.get("parroquia"),
+            r.get("canton"),
+            r.get("provincia"),
+            r.get("fecha"),
+            r.get("tramo_vial"),
+            r.get("universidad")
+        ])
+
+    # Ajustar ancho de columnas
+    for col_idx, header in enumerate(headers, 1):
+        max_length = len(str(header))
+        for row in ws.iter_rows(min_col=col_idx, max_col=col_idx, values_only=True):
+            cell_value = str(row[0]) if row[0] else ""
+            max_length = max(max_length, len(cell_value))
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_length + 2, 50)
+
+    output = BytesIO()
+    wb.save(output)
+    output.seek(0)
+
+    return Response(
+        output,
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": "attachment; filename=alcantarillas.xlsx"}
+    )
 
 @app.route("/api/export/alcantarillas/pdf", methods=["GET"])
 @require_auth
 def export_pdf():
-    return jsonify({"message": "Exportación PDF no implementada, use CSV"}), 501
+    rows = supabase.table("alcantarillas").select("*").order("ficha_numero").execute().data
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=20, leftMargin=20,
+                            topMargin=20, bottomMargin=20)
+    elements = []
+
+    # Datos de la tabla
+    table_data = [["ID", "Ficha", "Ubicación", "Parroquia", "Cantón", "Provincia",
+                   "Fecha", "Tramo Vial", "Universidad"]]
+    for r in rows:
+        table_data.append([
+            r.get("id"),
+            r.get("ficha_numero"),
+            r.get("ubicacion"),
+            r.get("parroquia"),
+            r.get("canton"),
+            r.get("provincia"),
+            r.get("fecha"),
+            r.get("tramo_vial"),
+            r.get("universidad")
+        ])
+
+    table = Table(table_data, repeatRows=1)
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+        ('GRID', (0, 0), (-1, -1), 1, colors.black),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.whitesmoke, colors.lightgrey]),
+    ]))
+
+    elements.append(table)
+    doc.build(elements)
+    buffer.seek(0)
+
+    return Response(
+        buffer,
+        mimetype="application/pdf",
+        headers={"Content-Disposition": "attachment; filename=alcantarillas.pdf"}
+    )
 
 # ═════════════════════════════════════════════
 # MAIN
