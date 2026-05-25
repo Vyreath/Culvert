@@ -77,7 +77,7 @@ const AlcantarillasUI = (() => {
 
     tbody.innerHTML = rows.map(row => `
       <tr>
-        <td>#${escapeHTML(row.ficha_numero ?? row.id)}</td>
+        <td>#${escapeHTML(row.ficha_numero || '—')}</td>
         <td>${escapeHTML(valueOrDash(row.ubicacion))}</td>
         <td>${escapeHTML(valueOrDash(row.provincia))}</td>
         <td>${escapeHTML(valueOrDash(row.canton))}</td>
@@ -96,7 +96,7 @@ const AlcantarillasUI = (() => {
             <button class="btn btn-secondary btn-icon" title="Editar" onclick="AlcantarillasUI.edit(${row.id})">
               <i class="fa-solid fa-pen"></i>
             </button>
-            <button class="btn btn-danger btn-icon" title="Eliminar" onclick="AlcantarillasUI.remove(${row.id}, '${escapeHTML(row.ficha_numero ?? row.id)}')">
+            <button class="btn btn-danger btn-icon" title="Eliminar" onclick="AlcantarillasUI.remove(${row.id}, '${escapeHTML(row.ficha_numero || 'Sin ficha')}')">
               <i class="fa-solid fa-trash"></i>
             </button>
           </div>
@@ -180,7 +180,7 @@ const AlcantarillasUI = (() => {
     const editing = Boolean(row?.id);
     Modal.create({
       id: 'alcantarilla-modal',
-      title: editing ? `Editar alcantarilla #${row.ficha_numero || row.id}` : 'Nueva alcantarilla',
+      title: editing ? `Editar alcantarilla #${row.ficha_numero || 'Sin ficha'}` : 'Nueva alcantarilla',
       size: 'lg',
       body: formBody(row || {}),
       footer: formFooter(),

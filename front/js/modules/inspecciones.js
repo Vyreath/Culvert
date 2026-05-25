@@ -1,5 +1,5 @@
 const InspeccionesUI = (() => {
-  const state = { filterAlcId: '' };
+  const state = { filterAlcId: '', alcantarillas: [] };
 
   function escapeHTML(value) {
     return String(value ?? '')
@@ -8,6 +8,11 @@ const InspeccionesUI = (() => {
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#039;');
+  }
+
+  function getFichaLabel(alcId) {
+    const alc = state.alcantarillas.find(a => a.id == alcId);
+    return alc ? `#${alc.ficha_numero} - ${alc.ubicacion || ''}` : `ID ${alcId}`;
   }
 
   async function load() {
@@ -32,7 +37,7 @@ const InspeccionesUI = (() => {
     tbody.innerHTML = rows.map(r => `
       <tr>
         <td>${escapeHTML(r.id)}</td>
-        <td>${escapeHTML(r.alcantarilla_id ?? '—')}</td>
+        <td>${escapeHTML(getFichaLabel(r.alcantarilla_id))}</td>
         <td>${escapeHTML(fmtDate(r.fecha))}</td>
         <td>${escapeHTML(r.inspector ?? '—')}</td>
         <td>${escapeHTML(r.observaciones ?? '—')}</td>
@@ -45,13 +50,20 @@ const InspeccionesUI = (() => {
       </tr>`).join('');
   }
 
-  function formBody(row = {}) {
+  function formBody(row = {}, alcantarillas = []) {
+    const opcionesAlc = alcantarillas.map(a =>
+      `<option value="${a.id}" ${a.id == row.alcantarilla_id ? 'selected' : ''}>#${a.ficha_numero} - ${a.ubicacion || 'Sin ubicación'}</option>`
+    ).join('');
+
     return `
       <form id="inspeccion-form">
         <div class="form-grid">
           <div class="form-group">
-            <label class="form-label" for="alcantarilla_id">Alcantarilla ID <span class="required">*</span></label>
-            <input class="form-control" id="alcantarilla_id" name="alcantarilla_id" type="number" value="${escapeHTML(row.alcantarilla_id ?? '')}" required>
+            <label class="form-label" for="alcantarilla_id">Alcantarilla <span class="required">*</span></label>
+            <select class="form-control" id="alcantarilla_id" name="alcantarilla_id" required>
+              <option value="">Seleccione...</option>
+              ${opcionesAlc}
+            </select>
           </div>
           <div class="form-group">
             <label class="form-label" for="fecha">Fecha <span class="required">*</span></label>
@@ -69,12 +81,20 @@ const InspeccionesUI = (() => {
       </form>`;
   }
 
-  function openForm(row = null) {
+  async function openForm(row = null) {
+    let alcantarillas = [];
+    try {
+      const res = await API.getAlcantarillas({ per_page: 1000 });
+      alcantarillas = res.data;
+    } catch (e) {
+      // lista vacía
+    }
+
     const editing = Boolean(row?.id);
     Modal.create({
       id: 'inspeccion-modal',
       title: editing ? 'Editar inspección' : 'Nueva inspección',
-      body: formBody(row || {}),
+      body: formBody(row || {}, alcantarillas),
       footer: `<button class="btn btn-ghost" onclick="Modal.close('inspeccion-modal')">Cancelar</button>
                <button class="btn btn-primary btn-submit" type="submit" form="inspeccion-form"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>`,
       onOpen: () => {
@@ -131,6 +151,7 @@ const InspeccionesUI = (() => {
   async function populateAlcantarillaFilter() {
     try {
       const res = await API.getAlcantarillas({ per_page: 1000 });
+      state.alcantarillas = res.data;
       const select = document.getElementById('filter-alcantarilla-inspeccion');
       if (!select) return;
       select.innerHTML = '<option value="">Todas las alcantarillas</option>';

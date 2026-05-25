@@ -11,9 +11,14 @@ from functools import wraps
 
 from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
+from openpyxl.styles import PatternFill, Font, Alignment, Border, Side
 from reportlab.lib import colors
-from reportlab.lib.pagesizes import A4, landscape
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import (SimpleDocTemplate, Table, TableStyle,
+                                Paragraph, Spacer, PageBreak, KeepTogether)
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import cm
+from reportlab.lib.enums import TA_CENTER, TA_LEFT
 
 BASE_DIR = Path(__file__).resolve().parent
 ENV_PATH = BASE_DIR / ".env"
@@ -28,13 +33,9 @@ if not SUPABASE_URL or not SUPABASE_KEY:
     raise RuntimeError(f"Faltan credenciales de Supabase. Configura SUPABASE_URL y SUPABASE_KEY en {ENV_PATH}")
 
 supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-supabase_admin = create_client(SUPABASE_URL, SUPABASE_KEY)  # mismo cliente con service_role
+supabase_admin = create_client(SUPABASE_URL, SUPABASE_KEY)
 
 FRONT_DIR = Path(os.getenv("FRONT_DIR", BASE_DIR / "front")).resolve()
-
-print("BASE_DIR =", BASE_DIR)
-print("FRONT_DIR =", FRONT_DIR)
-print("EXISTE =", FRONT_DIR.exists())
 
 app = Flask(__name__)
 CORS(app)
@@ -623,42 +624,33 @@ def dashboard_kpis():
     })
 
 # ═════════════════════════════════════════════
-# MAPA GIS (CORREGIDO - Ahora transforma UTM a WGS84)
+# MAPA GIS
 # ═════════════════════════════════════════════
 @app.route("/api/mapa/puntos", methods=["GET"])
 @require_auth
 def mapa_puntos():
     provincia = request.args.get("provincia")
-
-    # Seleccionamos solo las columnas necesarias, incluyendo coordenadas UTM
     query = supabase.table("alcantarillas").select(
         "id, ficha_numero, ubicacion, canton, provincia, tramo_vial, coordenada_este, coordenada_norte"
     )
-
     if provincia:
         query = query.ilike("provincia", f"%{provincia}%")
-
-    # Solo registros con ambas coordenadas no nulas
     query = query.not_.is_("coordenada_este", "null").not_.is_("coordenada_norte", "null")
     rows = query.limit(2000).execute().data
-
     features = []
     for r in rows:
         este = r.get("coordenada_este")
         norte = r.get("coordenada_norte")
-
-        # Verificación de seguridad
         try:
             este = float(este)
             norte = float(norte)
         except (TypeError, ValueError):
             continue
-
         features.append({
             "type": "Feature",
             "geometry": {
                 "type": "Point",
-                "coordinates": [este, norte]      # UTM (este, norte)
+                "coordinates": [este, norte]
             },
             "properties": {
                 "id": r.get("id"),
@@ -667,10 +659,9 @@ def mapa_puntos():
                 "canton": r.get("canton"),
                 "provincia": r.get("provincia"),
                 "tramo_vial": r.get("tramo_vial"),
-                "projection": "utm"               # <-- ¡clave para el frontend!
+                "projection": "utm"
             }
         })
-
     return jsonify({
         "type": "FeatureCollection",
         "features": features,
@@ -678,41 +669,319 @@ def mapa_puntos():
     })
 
 # ═════════════════════════════════════════════
-# EXPORTACIONES
+# FUNCIÓN AUXILIAR PARA EXPORTACIONES COMPLETAS
+# ═════════════════════════════════════════════
+def _get_full_alcantarillas():
+    """Obtiene alcantarillas con tuberías, muros y pozos relacionados."""
+    rows = supabase.table("alcantarillas").select("*").order("ficha_numero").execute().data
+    full = []
+    for r in rows:
+        aid = r["id"]
+        r["tuberias"] = supabase.table("tuberias").select(
+            "*, materiales(nombre), estados(nombre)"
+        ).eq("alcantarilla_id", aid).execute().data
+        r["muros"] = supabase.table("muros").select(
+            "*, materiales(nombre), estados(nombre)"
+        ).eq("alcantarilla_id", aid).execute().data
+        r["pozos"] = supabase.table("pozos_recoleccion").select(
+            "*, estados(nombre)"
+        ).eq("alcantarilla_id", aid).execute().data
+        full.append(r)
+    return full
+
+# ═════════════════════════════════════════════
+# EXCEL – HOJA RESUMEN + FICHAS DETALLADAS
 # ═════════════════════════════════════════════
 @app.route("/api/export/alcantarillas/excel", methods=["GET"])
 @require_auth
 def export_excel():
-    rows = supabase.table("alcantarillas").select("*").order("ficha_numero").execute().data
-
+    rows = _get_full_alcantarillas()
     wb = Workbook()
+
+    AZUL_OSC  = "1F3864"
+    AZUL_MED  = "2E75B6"
+    AZUL_CLAR = "BDD7EE"
+    GRIS      = "D6DCE4"
+    BLANCO    = "FFFFFF"
+    NARANJA   = "ED7D31"
+
+    def make_border():
+        s = Side(style='thin', color='000000')
+        return Border(left=s, right=s, top=s, bottom=s)
+
+    def hdr_cell(ws, row, col, value, bg=AZUL_OSC, fg=BLANCO, bold=True, size=9, align='center'):
+        c = ws.cell(row=row, column=col, value=value)
+        c.font = Font(name='Calibri', bold=bold, color=fg, size=size)
+        c.fill = PatternFill('solid', fgColor=bg)
+        c.alignment = Alignment(horizontal=align, vertical='center')
+        c.border = make_border()
+        return c
+
+    def data_cell(ws, row, col, value, bg=BLANCO, size=8, align='center'):
+        c = ws.cell(row=row, column=col, value=value)
+        c.font = Font(name='Calibri', color='000000', size=size)
+        c.fill = PatternFill('solid', fgColor=bg)
+        c.alignment = Alignment(horizontal=align, vertical='center')
+        c.border = make_border()
+        return c
+
+    # ─── Hoja 1: Resumen ──────────────────────────────────────────────
     ws = wb.active
-    ws.title = "Alcantarillas"
+    ws.title = 'Resumen'
+    ws.sheet_view.showGridLines = False
 
-    headers = ["ID", "Ficha", "Ubicación", "Parroquia", "Cantón", "Provincia",
-               "Fecha", "Tramo Vial", "Universidad"]
-    ws.append(headers)
+    ws.merge_cells('A1:N1')
+    ws['A1'].value = 'PONTIFICIA UNIVERSIDAD CATÓLICA DEL ECUADOR'
+    ws['A1'].font = Font(name='Calibri', bold=True, color=BLANCO, size=14)
+    ws['A1'].fill = PatternFill('solid', fgColor=AZUL_OSC)
+    ws['A1'].alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[1].height = 28
 
+    ws.merge_cells('A2:N2')
+    ws['A2'].value = 'INVENTARIO DE ALCANTARILLAS — FICHA TÉCNICA RESUMEN'
+    ws['A2'].font = Font(name='Calibri', bold=True, color=BLANCO, size=11)
+    ws['A2'].fill = PatternFill('solid', fgColor=AZUL_MED)
+    ws['A2'].alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[2].height = 20
+
+    headers = [
+        ("N° Ficha", 6), ("Universidad", 18), ("Ubicación", 16),
+        ("Parroquia", 12), ("Cantón", 12), ("Provincia", 12),
+        ("Fecha", 9), ("Tramo Vial", 20),
+        ("Mat. Tubería", 12), ("Long. Tub.(m)", 10), ("Diám. Tub.(m)", 10),
+        ("Est. Tubería", 10), ("Pozo Recol.", 9), ("Coordenadas UTM", 18)
+    ]
+    for i, (label, width) in enumerate(headers, 1):
+        hdr_cell(ws, 3, i, label, bg=AZUL_MED, size=8)
+        ws.column_dimensions[get_column_letter(i)].width = width
+    ws.row_dimensions[3].height = 30
+
+    for ri, r in enumerate(rows):
+        row_num = ri + 4
+        bg = AZUL_CLAR if ri % 2 == 0 else GRIS
+
+        tub  = r["tuberias"][0]  if r["tuberias"]  else {}
+        pozo = r["pozos"][0]     if r["pozos"]      else {}
+
+        mat_tub  = (tub.get("materiales") or {}).get("nombre", "—")
+        est_tub  = (tub.get("estados")    or {}).get("nombre", "—")
+        long_tub = tub.get("longitud", "—")
+        diam_tub = tub.get("diametro", "—")
+        pozo_si  = "Sí" if pozo.get("existe") else ("No" if pozo else "—")
+        coord    = f"E:{r.get('coordenada_este','')} / N:{r.get('coordenada_norte','')}" if r.get('coordenada_este') else "—"
+
+        vals = [
+            r.get("ficha_numero") or '—',
+            r.get("universidad") or '—',
+            r.get("ubicacion") or '—',
+            r.get("parroquia") or '—',
+            r.get("canton") or '—',
+            r.get("provincia") or '—',
+            r.get("fecha") or '—',
+            r.get("tramo_vial") or '—',
+            mat_tub, long_tub, diam_tub, est_tub, pozo_si, coord
+        ]
+        for ci, v in enumerate(vals, 1):
+            align = 'left' if ci in (2,3,4,5,6,8) else 'center'
+            data_cell(ws, row_num, ci, v, bg=bg, align=align)
+        ws.row_dimensions[row_num].height = 16
+
+    total_row = len(rows) + 4
+    ws.merge_cells(f'A{total_row}:G{total_row}')
+    ws[f'A{total_row}'].value = f'TOTAL DE REGISTROS: {len(rows)}'
+    ws[f'A{total_row}'].font = Font(name='Calibri', bold=True, color=BLANCO, size=9)
+    ws[f'A{total_row}'].fill = PatternFill('solid', fgColor=AZUL_OSC)
+    ws[f'A{total_row}'].alignment = Alignment(horizontal='center', vertical='center')
+    ws.row_dimensions[total_row].height = 18
+
+    # ─── Hoja 2: Fichas Detalladas ────────────────────────────────────
+    ws2 = wb.create_sheet('Fichas Detalladas')
+    ws2.sheet_view.showGridLines = False
+    for i, w in enumerate([14]*8, 1):
+        ws2.column_dimensions[get_column_letter(i)].width = w
+
+    current_row = 1
     for r in rows:
-        ws.append([
-            r.get("id"),
-            r.get("ficha_numero"),
-            r.get("ubicacion"),
-            r.get("parroquia"),
-            r.get("canton"),
-            r.get("provincia"),
-            r.get("fecha"),
-            r.get("tramo_vial"),
-            r.get("universidad")
-        ])
+        tub  = r["tuberias"][0]  if r["tuberias"]  else {}
+        muro = r["muros"][0]     if r["muros"]     else {}
+        pozo = r["pozos"][0]     if r["pozos"]      else {}
 
-    # Ajustar ancho de columnas
-    for col_idx, header in enumerate(headers, 1):
-        max_length = len(str(header))
-        for row in ws.iter_rows(min_col=col_idx, max_col=col_idx, values_only=True):
-            cell_value = str(row[0]) if row[0] else ""
-            max_length = max(max_length, len(cell_value))
-        ws.column_dimensions[get_column_letter(col_idx)].width = min(max_length + 2, 50)
+        CR = current_row
+
+        # Título
+        ws2.merge_cells(f'A{CR}:F{CR}')
+        hdr_cell(ws2, CR, 1, 'FICHA TÉCNICA - ALCANTARILLA', bg=AZUL_MED, size=11)
+        ws2.merge_cells(f'G{CR}:H{CR}')
+        hdr_cell(ws2, CR, 7, f"N° {r.get('ficha_numero') or '—'}", bg=AZUL_MED, size=11)
+        ws2.row_dimensions[CR].height = 22
+        CR += 1
+
+        # Ubicación, Parroquia, Cantón, Provincia
+        for ci, (lbl, val) in enumerate([
+            ("Ubicación", r.get("ubicacion") or '—'),
+            ("Parroquia", r.get("parroquia") or '—'),
+            ("Cantón",    r.get("canton") or '—'),
+            ("Provincia", r.get("provincia") or '—')
+        ], 1):
+            col = (ci-1)*2 + 1
+            hdr_cell(ws2, CR, col, lbl, bg=AZUL_MED, size=8)
+            data_cell(ws2, CR+1, col, val, align='left')
+        ws2.row_dimensions[CR].height = 14
+        ws2.row_dimensions[CR+1].height = 14
+        CR += 2
+
+        # Fecha, Tramo Vial
+        hdr_cell(ws2, CR, 1, 'Fecha', bg=AZUL_MED, size=8)
+        data_cell(ws2, CR, 2, r.get('fecha') or '—')
+        hdr_cell(ws2, CR, 3, 'Tramo Vial', bg=AZUL_MED, size=8)
+        ws2.merge_cells(f'D{CR}:H{CR}')
+        data_cell(ws2, CR, 4, r.get('tramo_vial') or '—', align='left')
+        ws2.row_dimensions[CR].height = 14
+        CR += 1
+
+        # INFRAESTRUCTURA EXISTENTE
+        ws2.merge_cells(f'A{CR}:H{CR}')
+        hdr_cell(ws2, CR, 1, 'INFRAESTRUCTURA EXISTENTE', bg=AZUL_OSC, size=9)
+        ws2.row_dimensions[CR].height = 16
+        CR += 1
+
+        # MUROS DE ALA / TUBERÍA
+        ws2.merge_cells(f'A{CR}:D{CR}')
+        hdr_cell(ws2, CR, 1, 'MUROS DE ALA', bg=AZUL_MED, size=9)
+        ws2.merge_cells(f'E{CR}:H{CR}')
+        hdr_cell(ws2, CR, 5, 'TUBERÍA', bg=AZUL_MED, size=9)
+        ws2.row_dimensions[CR].height = 16
+        CR += 1
+
+        ws2.merge_cells(f'A{CR}:B{CR}')
+        hdr_cell(ws2, CR, 1, 'Dimensiones', bg=AZUL_MED, size=8)
+        ws2.merge_cells(f'C{CR}:D{CR}')
+        hdr_cell(ws2, CR, 3, 'Material', bg=AZUL_MED, size=8)
+        # Eliminado merge E:H que causaba el error
+        hdr_cell(ws2, CR, 5, 'Material', bg=AZUL_MED, size=8)  # Ahora solo escribe en E
+        ws2.row_dimensions[CR].height = 14
+        CR += 1
+
+        mat_muro = (muro.get("materiales") or {}).get("nombre","—")
+        mat_tub  = (tub.get("materiales")  or {}).get("nombre","—")
+
+        hdr_cell(ws2, CR, 1, 'Longitud', bg=GRIS, fg='000000', bold=False, size=8)
+        data_cell(ws2, CR, 2, f"{muro.get('longitud','NA')} m")
+        hdr_cell(ws2, CR, 3, mat_muro, bg=GRIS, fg='000000', bold=False, size=8)
+        data_cell(ws2, CR, 4, '')
+        # Ahora escribimos Cemento en E, y el ☑/☐ en F sin merge
+        hdr_cell(ws2, CR, 5, 'Cemento', bg=GRIS, fg='000000', bold=False, size=8)
+        data_cell(ws2, CR, 6, '☑' if mat_tub=='Cemento' else '☐')
+        hdr_cell(ws2, CR, 7, 'PVC', bg=GRIS, fg='000000', bold=False, size=8)
+        data_cell(ws2, CR, 8, '☑' if mat_tub=='PVC' else '☐')
+        ws2.row_dimensions[CR].height = 14
+        CR += 1
+
+        hdr_cell(ws2, CR, 1, 'Espesor', bg=GRIS, fg='000000', bold=False, size=8)
+        data_cell(ws2, CR, 2, f"{muro.get('espesor','NA')} m")
+        ws2.merge_cells(f'E{CR}:H{CR}')
+        hdr_cell(ws2, CR, 5, 'Dimensiones', bg=AZUL_MED, size=8)
+        ws2.row_dimensions[CR].height = 14
+        CR += 1
+
+        hdr_cell(ws2, CR, 1, 'Solera', bg=GRIS, fg='000000', bold=False, size=8)
+        data_cell(ws2, CR, 2, '')
+        hdr_cell(ws2, CR, 3, 'H.Armado', bg=GRIS, fg='000000', bold=False, size=8)
+        data_cell(ws2, CR, 4, '☑' if mat_muro=='Hormigón Armado' else '☐')
+        hdr_cell(ws2, CR, 5, 'Longitud', bg=GRIS, fg='000000', bold=False, size=8)
+        ws2.merge_cells(f'F{CR}:G{CR}')
+        data_cell(ws2, CR, 6, f"{tub.get('longitud','—')} m")
+        ws2.row_dimensions[CR].height = 14
+        CR += 1
+
+        hdr_cell(ws2, CR, 1, 'Muro gavión', bg=GRIS, fg='000000', bold=False, size=8)
+        data_cell(ws2, CR, 2, '')
+        hdr_cell(ws2, CR, 3, 'Estado', bg=GRIS, fg='000000', bold=False, size=8)
+        est_muro = (muro.get("estados") or {}).get("nombre","—")
+        data_cell(ws2, CR, 4, est_muro)
+        hdr_cell(ws2, CR, 5, 'Diámetro', bg=GRIS, fg='000000', bold=False, size=8)
+        ws2.merge_cells(f'F{CR}:G{CR}')
+        data_cell(ws2, CR, 6, f"{tub.get('diametro','—')} m")
+        ws2.row_dimensions[CR].height = 14
+        CR += 1
+
+        # MURO CABEZAL
+        ws2.merge_cells(f'A{CR}:H{CR}')
+        hdr_cell(ws2, CR, 1, 'MURO CABEZAL', bg=AZUL_MED, size=9)
+        ws2.row_dimensions[CR].height = 16
+        CR += 1
+
+        for lbl_d, key_d in [("Longitud", "longitud"), ("Espesor", "espesor")]:
+            hdr_cell(ws2, CR, 1, 'Dimensiones', bg=AZUL_MED, size=8)
+            hdr_cell(ws2, CR, 2, lbl_d, bg=GRIS, fg='000000', bold=False, size=8)
+            data_cell(ws2, CR, 3, muro.get(key_d, 'NA'))
+            if lbl_d == "Longitud":
+                hdr_cell(ws2, CR, 4, 'Estado', bg=AZUL_MED, size=8)
+                for ci2, lbl2 in enumerate(["Bueno","Regular","Malo"], 5):
+                    hdr_cell(ws2, CR, ci2, lbl2, bg=GRIS, fg='000000', bold=False, size=8)
+                    est_m = (muro.get("estados") or {}).get("nombre","")
+                    data_cell(ws2, CR, ci2, '☑' if est_m==lbl2 else '☐')
+            else:
+                data_cell(ws2, CR, 4, '')
+            ws2.row_dimensions[CR].height = 14
+            CR += 1
+
+        # POZO DE RECOLECCIÓN
+        ws2.merge_cells(f'A{CR}:H{CR}')
+        hdr_cell(ws2, CR, 1, 'POZO DE RECOLECCIÓN', bg=AZUL_MED, size=9)
+        ws2.row_dimensions[CR].height = 16
+        CR += 1
+
+        tiene_pozo = pozo.get("existe", False) if pozo else False
+        hdr_cell(ws2, CR, 1, 'Sí', bg=GRIS, fg='000000', bold=False, size=8)
+        data_cell(ws2, CR, 2, '☑' if tiene_pozo else '☐')
+        hdr_cell(ws2, CR, 3, 'Dimensiones', bg=AZUL_MED, size=8)
+        hdr_cell(ws2, CR, 4, 'Ancho', bg=GRIS, fg='000000', bold=False, size=8)
+        data_cell(ws2, CR, 5, pozo.get('ancho','NA') if pozo else 'NA')
+        hdr_cell(ws2, CR, 6, 'ESTADO', bg=AZUL_MED, size=8)
+        est_p = (pozo.get("estados") or {}).get("nombre","") if pozo else ""
+        for ci2, lbl2 in enumerate(["Bueno","Regular","Malo"], 7):
+            hdr_cell(ws2, CR, ci2, lbl2, bg=GRIS, fg='000000', bold=False, size=8)
+        ws2.row_dimensions[CR].height = 14
+        CR += 1
+
+        hdr_cell(ws2, CR, 1, 'No', bg=GRIS, fg='000000', bold=False, size=8)
+        data_cell(ws2, CR, 2, '☑' if not tiene_pozo else '☐')
+        data_cell(ws2, CR, 3, '')
+        hdr_cell(ws2, CR, 4, 'Largo', bg=GRIS, fg='000000', bold=False, size=8)
+        data_cell(ws2, CR, 5, pozo.get('largo','NA') if pozo else 'NA')
+        data_cell(ws2, CR, 6, '')
+        for ci2, lbl2 in enumerate(["Bueno","Regular","Malo"], 7):
+            data_cell(ws2, CR, ci2, '☑' if est_p==lbl2 else '☐')
+        ws2.row_dimensions[CR].height = 14
+        CR += 1
+
+        # COORDENADAS UTM
+        ws2.merge_cells(f'A{CR}:H{CR}')
+        hdr_cell(ws2, CR, 1, 'COORDENADAS UTM', bg=AZUL_OSC, size=9)
+        ws2.row_dimensions[CR].height = 14
+        CR += 1
+
+        hdr_cell(ws2, CR, 1, 'ESTE', bg=NARANJA, size=8)
+        ws2.merge_cells(f'B{CR}:D{CR}')
+        data_cell(ws2, CR, 2, r.get('coordenada_este',''))
+        hdr_cell(ws2, CR, 5, 'NORTE', bg=NARANJA, size=8)
+        ws2.merge_cells(f'F{CR}:H{CR}')
+        data_cell(ws2, CR, 6, r.get('coordenada_norte',''))
+        ws2.row_dimensions[CR].height = 14
+        CR += 1
+
+        # OBSERVACIONES
+        hdr_cell(ws2, CR, 1, 'Observaciones', bg=AZUL_MED, size=8)
+        ws2.merge_cells(f'B{CR}:H{CR}')
+        data_cell(ws2, CR, 2, r.get('observaciones',''), align='left', size=8)
+        ws2.row_dimensions[CR].height = 20
+        CR += 1
+
+        # Separador
+        ws2.row_dimensions[CR].height = 8
+        CR += 1
+        current_row = CR
 
     output = BytesIO()
     wb.save(output)
@@ -724,45 +993,355 @@ def export_excel():
         headers={"Content-Disposition": "attachment; filename=alcantarillas.xlsx"}
     )
 
+# ═════════════════════════════════════════════
+# PDF – FORMATO DETALLADO
+# ═════════════════════════════════════════════
 @app.route("/api/export/alcantarillas/pdf", methods=["GET"])
 @require_auth
 def export_pdf():
-    rows = supabase.table("alcantarillas").select("*").order("ficha_numero").execute().data
-
+    rows = _get_full_alcantarillas()
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=landscape(A4), rightMargin=20, leftMargin=20,
-                            topMargin=20, bottomMargin=20)
+    doc = SimpleDocTemplate(buffer, pagesize=A4,
+                            rightMargin=1.2*cm, leftMargin=1.2*cm,
+                            topMargin=1.2*cm, bottomMargin=1.2*cm)
+
+    AZUL_OSC  = colors.HexColor("#1F3864")
+    AZUL_MED  = colors.HexColor("#2E75B6")
+    AZUL_CLAR = colors.HexColor("#BDD7EE")
+    GRIS_CLAR = colors.HexColor("#D6DCE4")
+    GRIS_MED  = colors.HexColor("#F2F2F2")
+    NARANJA   = colors.HexColor("#ED7D31")
+    BLANCO    = colors.white
+    NEGRO     = colors.black
+
+    styles = getSampleStyleSheet()
+    st_titulo = ParagraphStyle('titulo', fontSize=10, fontName='Helvetica-Bold',
+                               textColor=BLANCO, alignment=TA_CENTER, leading=13)
+    st_sub    = ParagraphStyle('sub', fontSize=8, fontName='Helvetica-Bold',
+                               textColor=BLANCO, alignment=TA_CENTER, leading=11)
+    st_label  = ParagraphStyle('label', fontSize=7, fontName='Helvetica-Bold',
+                               textColor=NEGRO, alignment=TA_CENTER, leading=9)
+    st_labelL = ParagraphStyle('labelL', fontSize=7, fontName='Helvetica-Bold',
+                               textColor=NEGRO, alignment=TA_LEFT, leading=9)
+    st_val    = ParagraphStyle('val', fontSize=7, fontName='Helvetica',
+                               textColor=NEGRO, alignment=TA_LEFT, leading=9)
+    st_valc   = ParagraphStyle('valc', fontSize=7, fontName='Helvetica',
+                               textColor=NEGRO, alignment=TA_CENTER, leading=9)
+
+    PW = A4[0] - 2.4*cm
+
+    def P(text, style=None):
+        return Paragraph(str(text) if text is not None else '—', style or st_val)
+    def PL(text): return P(text, st_label)
+    def PC(text): return P(text, st_valc)
+    def PLL(text): return P(text, st_labelL)
+    def chk(cond): return '☑' if cond else '☐'
+
+    def thin_border():
+        return [
+            ('GRID', (0,0), (-1,-1), 0.5, NEGRO),
+            ('FONTNAME', (0,0), (-1,-1), 'Helvetica'),
+            ('FONTSIZE', (0,0), (-1,-1), 7),
+            ('TOPPADDING', (0,0), (-1,-1), 2),
+            ('BOTTOMPADDING', (0,0), (-1,-1), 2),
+            ('LEFTPADDING', (0,0), (-1,-1), 3),
+            ('RIGHTPADDING', (0,0), (-1,-1), 3),
+            ('VALIGN', (0,0), (-1,-1), 'MIDDLE'),
+        ]
+
     elements = []
 
-    # Datos de la tabla
-    table_data = [["ID", "Ficha", "Ubicación", "Parroquia", "Cantón", "Provincia",
-                   "Fecha", "Tramo Vial", "Universidad"]]
-    for r in rows:
-        table_data.append([
-            r.get("id"),
-            r.get("ficha_numero"),
-            r.get("ubicacion"),
-            r.get("parroquia"),
-            r.get("canton"),
-            r.get("provincia"),
-            r.get("fecha"),
-            r.get("tramo_vial"),
-            r.get("universidad")
+    # Portada resumen
+    hdr = Table(
+        [[P('PONTIFICIA UNIVERSIDAD CATÓLICA DEL ECUADOR', st_titulo),
+          P('FICHA TÉCNICA — RESUMEN DE ALCANTARILLAS', st_sub)]],
+        colWidths=[PW*0.65, PW*0.35]
+    )
+    hdr.setStyle(TableStyle([
+        ('BACKGROUND', (0,0),(0,0), AZUL_OSC),
+        ('BACKGROUND', (1,0),(1,0), AZUL_MED),
+        ('TOPPADDING', (0,0),(-1,-1), 6),
+        ('BOTTOMPADDING', (0,0),(-1,-1), 6),
+        ('GRID', (0,0),(-1,-1), 0.5, NEGRO),
+    ]))
+    elements.append(hdr)
+    elements.append(Spacer(1, 4))
+
+    col_w = [PW*0.05, PW*0.08, PW*0.14, PW*0.10, PW*0.10, PW*0.10,
+             PW*0.08, PW*0.15, PW*0.10, PW*0.10]
+    resumen_data = [[
+        PL('N°'), PL('Ficha'), PL('Ubicación'), PL('Parroquia'), PL('Cantón'),
+        PL('Provincia'), PL('Fecha'), PL('Tramo Vial'), PL('Mat.Tub.'), PL('Est.Tub.')
+    ]]
+    for idx, r in enumerate(rows):
+        tub = r['tuberias'][0] if r['tuberias'] else {}
+        mat = (tub.get('materiales') or {}).get('nombre','—')
+        est = (tub.get('estados') or {}).get('nombre','—')
+        bg = AZUL_CLAR if idx % 2 == 0 else GRIS_CLAR
+        resumen_data.append([
+            PC(str(idx+1)),
+            PC(r.get('ficha_numero') or '—'),
+            P(r.get('ubicacion') or '—'),
+            P(r.get('parroquia') or '—'),
+            P(r.get('canton') or '—'),
+            P(r.get('provincia') or '—'),
+            PC(str(r.get('fecha') or '—')),
+            P(r.get('tramo_vial') or '—'),
+            PC(mat), PC(est),
         ])
 
-    table = Table(table_data, repeatRows=1)
-    table.setStyle(TableStyle([
-        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-        ('GRID', (0, 0), (-1, -1), 1, colors.black),
-        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.whitesmoke, colors.lightgrey]),
-    ]))
+    t_res = Table(resumen_data, colWidths=col_w, repeatRows=1)
+    cmds = thin_border() + [
+        ('BACKGROUND', (0,0),(-1,0), AZUL_MED),
+        ('TEXTCOLOR', (0,0),(-1,0), BLANCO),
+        ('FONTNAME', (0,0),(-1,0), 'Helvetica-Bold'),
+    ]
+    for i in range(1, len(resumen_data)):
+        bg = AZUL_CLAR if i % 2 == 1 else GRIS_CLAR
+        cmds.append(('BACKGROUND', (0,i),(-1,i), bg))
+    t_res.setStyle(TableStyle(cmds))
+    elements.append(t_res)
 
-    elements.append(table)
+    total_row = Table(
+        [[P(f'TOTAL DE REGISTROS: {len(rows)}', st_sub)]],
+        colWidths=[PW]
+    )
+    total_row.setStyle(TableStyle([
+        ('BACKGROUND', (0,0),(-1,-1), AZUL_OSC),
+        ('TOPPADDING',(0,0),(-1,-1),4),('BOTTOMPADDING',(0,0),(-1,-1),4),
+    ]))
+    elements.append(total_row)
+    elements.append(PageBreak())
+
+    # Fichas individuales
+    for r in rows:
+        tub  = r['tuberias'][0]  if r['tuberias']  else {}
+        muro = r['muros'][0]     if r['muros']     else {}
+        pozo = r['pozos'][0]     if r['pozos']      else {}
+        mat_tub  = (tub.get('materiales') or {}).get('nombre','—')
+        est_tub  = (tub.get('estados') or {}).get('nombre','—')
+        mat_muro = (muro.get('materiales') or {}).get('nombre','—')
+        est_muro = (muro.get('estados') or {}).get('nombre','—')
+        est_pozo = (pozo.get('estados') or {}).get('nombre','') if pozo else ''
+        tiene_p  = pozo.get('existe', False) if pozo else False
+
+        ficha = []
+
+        # Encabezado
+        enc = Table([
+            [P('PONTIFICIA UNIVERSIDAD CATÓLICA DEL ECUADOR', st_titulo),
+             P(f"N° {r.get('ficha_numero') or '—'}", st_sub)]
+        ], colWidths=[PW*0.75, PW*0.25])
+        enc.setStyle(TableStyle([
+            ('BACKGROUND', (0,0),(0,0), AZUL_OSC),
+            ('BACKGROUND', (1,0),(1,0), AZUL_MED),
+            ('GRID', (0,0),(-1,-1), 0.5, NEGRO),
+            ('TOPPADDING',(0,0),(-1,-1),5),('BOTTOMPADDING',(0,0),(-1,-1),5),
+        ]))
+        ficha.append(enc)
+
+        ft = Table([[P('FICHA TÉCNICA - ALCANTARILLA', st_sub)]], colWidths=[PW])
+        ft.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,-1), AZUL_MED),
+            ('GRID',(0,0),(-1,-1),0.5,NEGRO),
+            ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),
+        ]))
+        ficha.append(ft)
+
+        # Datos de ubicación
+        c = PW / 8
+        t_ub = Table([
+            [PL('Ubicación'), PC(r.get('ubicacion') or '—'),
+             PL('Parroquia'), PC(r.get('parroquia') or '—'),
+             PL('Cantón'),    PC(r.get('canton') or '—'),
+             PL('Provincia'), PC(r.get('provincia') or '—')]
+        ], colWidths=[c*0.8, c*1.2, c*0.8, c*1.2, c*0.7, c*1.1, c*0.8, c*1.4])
+        t_ub.setStyle(TableStyle(thin_border() + [
+            ('BACKGROUND',(0,0),(0,0),AZUL_MED),('TEXTCOLOR',(0,0),(0,0),BLANCO),
+            ('BACKGROUND',(2,0),(2,0),AZUL_MED),('TEXTCOLOR',(2,0),(2,0),BLANCO),
+            ('BACKGROUND',(4,0),(4,0),AZUL_MED),('TEXTCOLOR',(4,0),(4,0),BLANCO),
+            ('BACKGROUND',(6,0),(6,0),AZUL_MED),('TEXTCOLOR',(6,0),(6,0),BLANCO),
+        ]))
+        ficha.append(t_ub)
+
+        t_ft2 = Table([
+            [PL('Fecha'), PC(str(r.get('fecha') or '—')),
+             PL('Tramo vial'), P(r.get('tramo_vial') or '—')]
+        ], colWidths=[PW*0.08, PW*0.17, PW*0.1, PW*0.65])
+        t_ft2.setStyle(TableStyle(thin_border() + [
+            ('BACKGROUND',(0,0),(0,0),AZUL_MED),('TEXTCOLOR',(0,0),(0,0),BLANCO),
+            ('BACKGROUND',(2,0),(2,0),AZUL_MED),('TEXTCOLOR',(2,0),(2,0),BLANCO),
+        ]))
+        ficha.append(t_ft2)
+
+        inf = Table([[P('INFRAESTRUCTURA EXISTENTE', st_sub)]], colWidths=[PW])
+        inf.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,-1),AZUL_OSC),
+            ('GRID',(0,0),(-1,-1),0.5,NEGRO),
+            ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),
+        ]))
+        ficha.append(inf)
+
+        # Muros de Ala y Tubería
+        LW = PW * 0.5 - 0.5
+        RW = PW * 0.5 - 0.5
+        lc = LW / 4
+        muro_rows = [
+            [PL('MUROS DE ALA'), P(''), PL('TUBERÍA'), P('')],
+            [PL('Dimensiones'), P(''), PL('Material'), P('')],
+            [PLL('Longitud'), PC(f"{muro.get('longitud','NA')} m"),
+             PLL('Cemento'), PC(chk(mat_tub=='Cemento'))],
+            [PLL('Espesor'),  PC(f"{muro.get('espesor','NA')} m"),
+             PLL('PVC'),      PC(chk(mat_tub=='PVC'))],
+            [PLL('Material muro'), PC(mat_muro),
+             PLL('M.Corrugado'),   PC(chk(mat_tub=='Metal Corrugado'))],
+            [PL('Dimensiones Tubería'), P(''), PL('Estado Tubería'), P('')],
+            [PLL('Solera'),      PC(chk(False)),
+             PLL('Longitud'),    PC(f"{tub.get('longitud','—')} m")],
+            [PLL('H.Armado'),    PC(chk(mat_muro=='Hormigón Armado')),
+             PLL('Diámetro'),    PC(f"{tub.get('diametro','—')} m")],
+            [PLL('Muro gavión'), PC(chk(False)),
+             PLL('Estado'),      PC(est_tub)],
+        ]
+        t_muros = Table(muro_rows, colWidths=[lc*1.3, lc*0.7, lc*1.3, lc*0.7])
+        cmds_m = thin_border() + [
+            ('SPAN',(0,0),(1,0)),('SPAN',(2,0),(3,0)),
+            ('BACKGROUND',(0,0),(1,0),AZUL_MED),('TEXTCOLOR',(0,0),(1,0),BLANCO),
+            ('BACKGROUND',(2,0),(3,0),AZUL_MED),('TEXTCOLOR',(2,0),(3,0),BLANCO),
+            ('FONTNAME',(0,0),(3,0),'Helvetica-Bold'),
+            ('SPAN',(0,1),(1,1)),('SPAN',(2,1),(3,1)),
+            ('BACKGROUND',(0,1),(1,1),AZUL_CLAR),
+            ('BACKGROUND',(2,1),(3,1),AZUL_CLAR),
+            ('FONTNAME',(0,1),(3,1),'Helvetica-Bold'),
+            ('SPAN',(0,5),(1,5)),('SPAN',(2,5),(3,5)),
+            ('BACKGROUND',(0,5),(1,5),AZUL_CLAR),
+            ('BACKGROUND',(2,5),(3,5),AZUL_CLAR),
+            ('FONTNAME',(0,5),(3,5),'Helvetica-Bold'),
+        ]
+        t_muros.setStyle(TableStyle(cmds_m))
+
+        # Muro Cabezal
+        mc_rows = [
+            [P('MURO CABEZAL', st_sub), P(''), P('')],
+            [PL('Dimensiones'), PLL('Longitud'), PC('NA')],
+            [P(''), PLL('Espesor'),  PC('NA')],
+            [PL('Estado'), PC(chk(est_muro=='Bueno')+' Bueno'),
+             PC(chk(est_muro=='Regular')+' Regular')],
+            [P(''), PC(chk(est_muro=='Malo')+' Malo'), P('')],
+        ]
+        t_mc = Table(mc_rows, colWidths=[RW*0.35, RW*0.35, RW*0.30])
+        t_mc.setStyle(TableStyle(thin_border() + [
+            ('SPAN',(0,0),(-1,0)),
+            ('BACKGROUND',(0,0),(-1,0),AZUL_MED),
+            ('BACKGROUND',(0,1),(0,2),AZUL_CLAR),
+            ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
+        ]))
+
+        t_infra = Table([[t_muros, t_mc]], colWidths=[LW+0.5, RW+0.5])
+        t_infra.setStyle(TableStyle([
+            ('VALIGN',(0,0),(-1,-1),'TOP'),
+            ('LEFTPADDING',(0,0),(-1,-1),0),
+            ('RIGHTPADDING',(0,0),(-1,-1),0),
+        ]))
+        ficha.append(t_infra)
+
+        # Estado
+        estado_rows = [
+            [PL('Estado'), PL('B'), PL('R'), PL('M'), PL('B'), PL('R'), PL('M')],
+            [P(''),
+             PC(chk(est_muro=='Bueno')), PC(chk(est_muro=='Regular')), PC(chk(est_muro=='Malo')),
+             PC(chk(est_muro=='Bueno')), PC(chk(est_muro=='Regular')), PC(chk(est_muro=='Malo'))],
+        ]
+        cw_e = PW/7
+        t_est = Table(estado_rows, colWidths=[cw_e]*7)
+        t_est.setStyle(TableStyle(thin_border() + [
+            ('BACKGROUND',(0,0),(0,1),AZUL_CLAR),
+            ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
+        ]))
+        ficha.append(t_est)
+
+        # Pozo
+        pz = Table([[P('Pozo de recoleccion', st_sub)]], colWidths=[PW])
+        pz.setStyle(TableStyle([
+            ('BACKGROUND',(0,0),(-1,-1),AZUL_MED),
+            ('GRID',(0,0),(-1,-1),0.5,NEGRO),
+            ('TOPPADDING',(0,0),(-1,-1),3),('BOTTOMPADDING',(0,0),(-1,-1),3),
+        ]))
+        ficha.append(pz)
+
+        cw_p = PW / 8
+        pozo_rows = [
+            [PLL('Si'),  PC(chk(tiene_p)),
+             PL('Dimensiones'), PLL('Ancho'), PC(str(pozo.get('ancho','NA')) if pozo else 'NA'),
+             PL('ESTADO'),
+             PC(chk(est_pozo=='Bueno')+' Bueno'),
+             PC(chk(est_pozo=='Regular')+' Reg.')],
+            [PLL('NO'), PC(chk(not tiene_p)),
+             P(''), PLL('Largo'), PC(str(pozo.get('largo','NA')) if pozo else 'NA'),
+             P(''),
+             PC(chk(est_pozo=='Malo')+' Malo'), P('')],
+        ]
+        t_pz = Table(pozo_rows, colWidths=[cw_p*0.5, cw_p*0.5, cw_p*1.2, cw_p*0.7, cw_p*0.9, cw_p*0.8, cw_p*1.7, cw_p*1.7])
+        t_pz.setStyle(TableStyle(thin_border() + [
+            ('BACKGROUND',(2,0),(2,1),AZUL_MED),('TEXTCOLOR',(2,0),(2,1),BLANCO),
+            ('SPAN',(2,0),(2,1)),
+            ('BACKGROUND',(5,0),(5,1),AZUL_MED),('TEXTCOLOR',(5,0),(5,1),BLANCO),
+            ('SPAN',(5,0),(5,1)),
+        ]))
+        ficha.append(t_pz)
+
+        # Fotografía placeholder
+        foto_label = Table([[PL('Fotografía')]], colWidths=[PW])
+        foto_label.setStyle(TableStyle([
+            ('GRID',(0,0),(-1,-1),0.5,NEGRO),
+            ('BACKGROUND',(0,0),(-1,-1),GRIS_MED),
+        ]))
+        ficha.append(foto_label)
+        foto_box = Table([[PC('[Espacio para fotografía]')]], colWidths=[PW])
+        foto_box.setStyle(TableStyle([
+            ('GRID',(0,0),(-1,-1),0.5,NEGRO),
+            ('ROWHEIGHT',(0,0),(0,0),80),
+            ('VALIGN',(0,0),(-1,-1),'MIDDLE'),
+        ]))
+        ficha.append(foto_box)
+
+        # Coordenadas
+        coord_rows = [
+            [PL('ESTE'),  PC(str(r.get('coordenada_este','—'))),
+             PC(str(r.get('coordenada_este','—'))),
+             PL('NORTE'), PC(str(r.get('coordenada_norte','—'))),
+             PC(str(r.get('coordenada_norte','—')))],
+        ]
+        t_coord = Table(
+            [[P('Cordenadas UTM', st_labelL)] + [P('')]*5, coord_rows[0]],
+            colWidths=[PW*0.15, PW*0.14, PW*0.14, PW*0.15, PW*0.21, PW*0.21]
+        )
+        t_coord.setStyle(TableStyle(thin_border() + [
+            ('SPAN',(0,0),(-1,0)),
+            ('BACKGROUND',(0,0),(-1,0),AZUL_CLAR),
+            ('FONTNAME',(0,0),(-1,0),'Helvetica-Bold'),
+            ('BACKGROUND',(0,1),(0,1),NARANJA),
+            ('BACKGROUND',(3,1),(3,1),NARANJA),
+            ('FONTNAME',(0,1),(0,1),'Helvetica-Bold'),('TEXTCOLOR',(0,1),(0,1),BLANCO),
+            ('FONTNAME',(3,1),(3,1),'Helvetica-Bold'),('TEXTCOLOR',(3,1),(3,1),BLANCO),
+        ]))
+        ficha.append(t_coord)
+
+        # Observaciones
+        obs = r.get('observaciones','') or ''
+        t_obs = Table([[PLL('Observaciones'), P(obs)]], colWidths=[PW*0.15, PW*0.85])
+        t_obs.setStyle(TableStyle(thin_border() + [
+            ('BACKGROUND',(0,0),(0,0),AZUL_MED),('TEXTCOLOR',(0,0),(0,0),BLANCO),
+            ('FONTNAME',(0,0),(0,0),'Helvetica-Bold'),
+            ('ROWHEIGHT',(0,0),(0,0),24),
+        ]))
+        ficha.append(t_obs)
+
+        elements.append(KeepTogether(ficha[:6]))
+        for el in ficha[6:]:
+            elements.append(el)
+        elements.append(PageBreak())
+
     doc.build(elements)
     buffer.seek(0)
 

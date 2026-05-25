@@ -1,5 +1,5 @@
 const TuberiasUI = (() => {
-  const state = { filterAlcId: '' };
+  const state = { filterAlcId: '', alcantarillas: [] };
 
   function escapeHTML(value) {
     return String(value ?? '')
@@ -8,6 +8,11 @@ const TuberiasUI = (() => {
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#039;');
+  }
+
+  function getFichaLabel(alcId) {
+    const alc = state.alcantarillas.find(a => a.id == alcId);
+    return alc ? `#${alc.ficha_numero} - ${alc.ubicacion || ''}` : `ID ${alcId}`;
   }
 
   async function load() {
@@ -32,7 +37,7 @@ const TuberiasUI = (() => {
     tbody.innerHTML = rows.map(r => `
       <tr>
         <td>${escapeHTML(r.id)}</td>
-        <td>${escapeHTML(r.alcantarilla_id ?? '—')}</td>
+        <td>${escapeHTML(getFichaLabel(r.alcantarilla_id))}</td>
         <td>${escapeHTML(r.materiales?.nombre ?? '—')}</td>
         <td>${escapeHTML(r.diametro ?? '—')}</td>
         <td>${escapeHTML(r.longitud ?? '—')}</td>
@@ -46,21 +51,42 @@ const TuberiasUI = (() => {
       </tr>`).join('');
   }
 
-  function formBody(row = {}) {
+  function formBody(row = {}, alcantarillas = [], estados = [], materiales = []) {
+    const opcionesAlc = alcantarillas.map(a =>
+      `<option value="${a.id}" ${a.id == row.alcantarilla_id ? 'selected' : ''}>#${a.ficha_numero} - ${a.ubicacion || 'Sin ubicación'}</option>`
+    ).join('');
+
+    const opcionesEst = estados.map(e =>
+      `<option value="${e.id}" ${e.id == row.estado_id ? 'selected' : ''}>${e.nombre}</option>`
+    ).join('');
+
+    const opcionesMat = materiales.map(m =>
+      `<option value="${m.id}" ${m.id == row.material_id ? 'selected' : ''}>${m.nombre}</option>`
+    ).join('');
+
     return `
       <form id="tuberia-form">
         <div class="form-grid">
           <div class="form-group">
-            <label class="form-label" for="alcantarilla_id">Alcantarilla ID</label>
-            <input class="form-control" id="alcantarilla_id" name="alcantarilla_id" type="number" value="${escapeHTML(row.alcantarilla_id ?? '')}" required>
+            <label class="form-label" for="alcantarilla_id">Alcantarilla <span class="required">*</span></label>
+            <select class="form-control" id="alcantarilla_id" name="alcantarilla_id" required>
+              <option value="">Seleccione...</option>
+              ${opcionesAlc}
+            </select>
           </div>
           <div class="form-group">
-            <label class="form-label" for="material_id">Material ID</label>
-            <input class="form-control" id="material_id" name="material_id" type="number" value="${escapeHTML(row.material_id ?? '')}">
+            <label class="form-label" for="material_id">Material</label>
+            <select class="form-control" id="material_id" name="material_id">
+              <option value="">Seleccione...</option>
+              ${opcionesMat}
+            </select>
           </div>
           <div class="form-group">
-            <label class="form-label" for="estado_id">Estado ID</label>
-            <input class="form-control" id="estado_id" name="estado_id" type="number" value="${escapeHTML(row.estado_id ?? '')}">
+            <label class="form-label" for="estado_id">Estado</label>
+            <select class="form-control" id="estado_id" name="estado_id">
+              <option value="">Seleccione...</option>
+              ${opcionesEst}
+            </select>
           </div>
           <div class="form-group">
             <label class="form-label" for="diametro">Diámetro</label>
@@ -74,12 +100,26 @@ const TuberiasUI = (() => {
       </form>`;
   }
 
-  function openForm(row = null) {
+  async function openForm(row = null) {
+    let alcantarillas = [], estados = [], materiales = [];
+    try {
+      const [resAlc, resEst, resMat] = await Promise.all([
+        API.getAlcantarillas({ per_page: 1000 }),
+        API.getEstados(),
+        API.getMateriales()
+      ]);
+      alcantarillas = resAlc.data;
+      estados = resEst;
+      materiales = resMat;
+    } catch (e) {
+      // listas vacías
+    }
+
     const editing = Boolean(row?.id);
     Modal.create({
       id: 'tuberia-modal',
       title: editing ? 'Editar tubería' : 'Nueva tubería',
-      body: formBody(row || {}),
+      body: formBody(row || {}, alcantarillas, estados, materiales),
       footer: `<button class="btn btn-ghost" onclick="Modal.close('tuberia-modal')">Cancelar</button>
                <button class="btn btn-primary btn-submit" type="submit" form="tuberia-form"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>`,
       onOpen: () => {
@@ -137,6 +177,7 @@ const TuberiasUI = (() => {
   async function populateAlcantarillaFilter() {
     try {
       const res = await API.getAlcantarillas({ per_page: 1000 });
+      state.alcantarillas = res.data;
       const select = document.getElementById('filter-alcantarilla');
       if (!select) return;
       select.innerHTML = '<option value="">Todas las alcantarillas</option>';

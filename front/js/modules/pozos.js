@@ -1,5 +1,5 @@
 const PozosUI = (() => {
-  const state = { filterAlcId: '' };
+  const state = { filterAlcId: '', alcantarillas: [] };
 
   function escapeHTML(value) {
     return String(value ?? '')
@@ -8,6 +8,11 @@ const PozosUI = (() => {
       .replaceAll('>', '&gt;')
       .replaceAll('"', '&quot;')
       .replaceAll("'", '&#039;');
+  }
+
+  function getFichaLabel(alcId) {
+    const alc = state.alcantarillas.find(a => a.id == alcId);
+    return alc ? `#${alc.ficha_numero} - ${alc.ubicacion || ''}` : `ID ${alcId}`;
   }
 
   async function load() {
@@ -32,7 +37,7 @@ const PozosUI = (() => {
     tbody.innerHTML = rows.map(r => `
       <tr>
         <td>${escapeHTML(r.id)}</td>
-        <td>${escapeHTML(r.alcantarilla_id ?? '—')}</td>
+        <td>${escapeHTML(getFichaLabel(r.alcantarilla_id))}</td>
         <td>${escapeHTML(r.profundidad ?? '—')}</td>
         <td>${escapeHTML(r.ancho ?? '—')} × ${escapeHTML(r.largo ?? '—')}</td>
         <td>${badgeEstado(r.estados?.nombre)}</td>
@@ -45,17 +50,31 @@ const PozosUI = (() => {
       </tr>`).join('');
   }
 
-  function formBody(row = {}) {
+  function formBody(row = {}, alcantarillas = [], estados = []) {
+    const opcionesAlc = alcantarillas.map(a =>
+      `<option value="${a.id}" ${a.id == row.alcantarilla_id ? 'selected' : ''}>#${a.ficha_numero} - ${a.ubicacion || 'Sin ubicación'}</option>`
+    ).join('');
+
+    const opcionesEst = estados.map(e =>
+      `<option value="${e.id}" ${e.id == row.estado_id ? 'selected' : ''}>${e.nombre}</option>`
+    ).join('');
+
     return `
       <form id="pozo-form">
         <div class="form-grid">
           <div class="form-group">
-            <label class="form-label" for="alcantarilla_id">Alcantarilla ID</label>
-            <input class="form-control" id="alcantarilla_id" name="alcantarilla_id" type="number" value="${escapeHTML(row.alcantarilla_id ?? '')}" required>
+            <label class="form-label" for="alcantarilla_id">Alcantarilla <span class="required">*</span></label>
+            <select class="form-control" id="alcantarilla_id" name="alcantarilla_id" required>
+              <option value="">Seleccione...</option>
+              ${opcionesAlc}
+            </select>
           </div>
           <div class="form-group">
-            <label class="form-label" for="estado_id">Estado ID</label>
-            <input class="form-control" id="estado_id" name="estado_id" type="number" value="${escapeHTML(row.estado_id ?? '')}">
+            <label class="form-label" for="estado_id">Estado</label>
+            <select class="form-control" id="estado_id" name="estado_id">
+              <option value="">Seleccione...</option>
+              ${opcionesEst}
+            </select>
           </div>
           <div class="form-group">
             <label class="form-label" for="profundidad">Profundidad (m)</label>
@@ -73,12 +92,24 @@ const PozosUI = (() => {
       </form>`;
   }
 
-  function openForm(row = null) {
+  async function openForm(row = null) {
+    let alcantarillas = [], estados = [];
+    try {
+      const [resAlc, resEst] = await Promise.all([
+        API.getAlcantarillas({ per_page: 1000 }),
+        API.getEstados()
+      ]);
+      alcantarillas = resAlc.data;
+      estados = resEst;
+    } catch (e) {
+      // listas vacías
+    }
+
     const editing = Boolean(row?.id);
     Modal.create({
       id: 'pozo-modal',
       title: editing ? 'Editar pozo' : 'Nuevo pozo',
-      body: formBody(row || {}),
+      body: formBody(row || {}, alcantarillas, estados),
       footer: `<button class="btn btn-ghost" onclick="Modal.close('pozo-modal')">Cancelar</button>
                <button class="btn btn-primary btn-submit" type="submit" form="pozo-form"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>`,
       onOpen: () => {
@@ -136,6 +167,7 @@ const PozosUI = (() => {
   async function populateAlcantarillaFilter() {
     try {
       const res = await API.getAlcantarillas({ per_page: 1000 });
+      state.alcantarillas = res.data;
       const select = document.getElementById('filter-alcantarilla-pozo');
       if (!select) return;
       select.innerHTML = '<option value="">Todas las alcantarillas</option>';
